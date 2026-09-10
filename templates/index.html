@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}首页 · 指标规则引擎 Demo{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>语义层元数据 + 规则引擎 Text-to-SQL</h1>
+  <p class="muted">AI 只做意图识别；SQL / 币种 / 阶段汇率全部由规则引擎根据元数据生成。SQLite 内嵌样例数据可直接执行。</p>
+  <div class="grid">
+    <div class="stat"><span class="muted">原子指标</span><b>{{ atomic_n }}</b></div>
+    <div class="stat"><span class="muted">派生指标</span><b>{{ derived_n }}</b></div>
+    <div class="stat"><span class="muted">复合指标</span><b>{{ composite_n }}</b></div>
+    <div class="stat"><span class="muted">分析维度</span><b>{{ dim_n }}</b></div>
+  </div>
+    <p style="margin-top:1rem" class="actions">
+    <a class="btn" href="{{ url_for('ask') }}">打开问数 Demo</a>
+    <a class="btn secondary" href="{{ url_for('dim_list') }}">管理分析维度</a>
+    <a class="btn secondary" href="{{ url_for('derived_list') }}">管理派生指标</a>
+  </p>
+</div>
+<div class="card">
+  <h2>推荐演示路径</h2>
+  <ol>
+    <li>打开「问数 Demo」，用默认表单查 <code>P001</code> 的「成本GAP」（CNY + 电站）。</li>
+    <li>对照结果 SQL：Contract / PJ 各自乘本阶段汇率后再相减。</li>
+    <li>改币种为 USD，或改用自然语言：「查询项目P001的成本GAP，人民币，带电站」。</li>
+  </ol>
+  <form method="post" action="{{ url_for('reset_db') }}" onsubmit="return confirm('确定重建库并重新灌种？');">
+    <button type="submit" class="danger">重建数据库</button>
+  </form>
+</div>
+{% endblock %}

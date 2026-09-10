@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}指标规则引擎 Demo{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <div class="brand">指标配置 · 规则引擎 Demo</div>
+    <div>
+      <a href="{{ url_for('index') }}">首页</a>
+      <a href="{{ url_for('dim_list') }}">分析维度</a>
+      <a href="{{ url_for('atomic_list') }}">原子指标</a>
+      <a href="{{ url_for('derived_list') }}">派生指标</a>
+      <a href="{{ url_for('composite_list') }}">复合指标</a>
+      <a href="{{ url_for('ask') }}">问数 Demo</a>
+    </div>
+  </nav>
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

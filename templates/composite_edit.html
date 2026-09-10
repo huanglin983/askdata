@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}编辑复合指标{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ '编辑' if row else '新增' }}复合指标</h1>
+  <form method="post">
+    {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+    <label>名称</label>
+    <input type="text" name="name" required value="{{ row.name if row else '' }}">
+    <label>公式（使用子指标中文名，支持 + - * / 与括号）</label>
+    <input type="text" name="formula" required value="{{ row.formula if row else '' }}" placeholder="Contract总成本 - PJ总成本">
+    <label>依赖子指标（派生 / 其他复合）</label>
+    <div class="checks">
+      {% for d in derived %}
+      <label><input type="checkbox" name="sub_metric_ids" value="{{ d.id }}" {% if d.id in selected %}checked{% endif %}> {{ d.name }}</label>
+      {% endfor %}
+      {% for c in composites %}
+      <label><input type="checkbox" name="sub_metric_ids" value="{{ c.id }}" {% if c.id in selected %}checked{% endif %}> {{ c.name }}（复合）</label>
+      {% endfor %}
+    </div>
+    {% include "_dim_bind.html" %}
+    <label><input type="checkbox" name="check_currency_same" value="1" {% if not row or row.check_currency_same %}checked{% endif %}> 强制币种一致</label>
+    <label><input type="checkbox" name="check_granularity_same" value="1" {% if not row or row.check_granularity_same %}checked{% endif %}> 强制粒度一致</label>
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">保存</button>
+      <a class="btn secondary" href="{{ url_for('composite_list') }}">返回</a>
+    </p>
+  </form>
+</div>
+{% endblock %}

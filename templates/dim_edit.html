@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}编辑分析维度{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ '编辑' if row else '新增' }}分析维度</h1>
+  <form method="post">
+    {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+    <label>名称</label>
+    <input type="text" name="name" required value="{{ row.name if row else '' }}" placeholder="电站">
+    <label>编码（字段 code，问数勾选用）</label>
+    <input type="text" name="code" required value="{{ row.code if row else '' }}" placeholder="power_plant">
+    <label>角色</label>
+    <select name="dim_role">
+      {% set role = row.dim_role if row else 'attr' %}
+      <option value="grain" {% if role=='grain' %}selected{% endif %}>粒度（grain）</option>
+      <option value="attr" {% if role=='attr' %}selected{% endif %}>分析展示（attr）</option>
+    </select>
+    <label>来源表</label>
+    <input type="text" name="source_table" required value="{{ row.source_table if row else 'dim_project' }}">
+    <label>来源字段</label>
+    <input type="text" name="source_field" required value="{{ row.source_field if row else '' }}">
+    <label>排序</label>
+    <input type="text" name="sort_no" value="{{ row.sort_no if row else 100 }}">
+    <label>备注</label>
+    <input type="text" name="remark" value="{{ row.remark if row else '' }}">
+    <label><input type="checkbox" name="enabled" value="1" {% if not row or row.enabled %}checked{% endif %}> 启用</label>
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">保存</button>
+      <a class="btn secondary" href="{{ url_for('dim_list') }}">返回</a>
+    </p>
+  </form>
+</div>
+{% endblock %}

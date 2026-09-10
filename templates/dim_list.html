@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}分析维度{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between">
+    <h1 style="margin:0">分析维度</h1>
+    <a class="btn" href="{{ url_for('dim_edit') }}">新增</a>
+  </div>
+  <p class="muted">维护可绑定的粒度维度与分析展示维度；指标编辑页勾选绑定后，问数引擎按绑定校验。</p>
+  <table>
+    <thead>
+      <tr>
+        <th>名称</th><th>编码</th><th>角色</th><th>来源</th><th>启用</th><th>排序</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.name }} <span class="badge">{{ r.id }}</span></td>
+        <td><code>{{ r.code }}</code></td>
+        <td>{{ '粒度' if r.dim_role=='grain' else '分析' }}</td>
+        <td><code>{{ r.source_table }}.{{ r.source_field }}</code></td>
+        <td>{{ '是' if r.enabled else '否' }}</td>
+        <td>{{ r.sort_no }}</td>
+        <td class="actions">
+          <a href="{{ url_for('dim_edit', dim_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('dim_delete', dim_id=r.id) }}" onsubmit="return confirm('删除？');">
+            <button type="submit" class="danger">删</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

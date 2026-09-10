@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}问数 Demo{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>问数 Demo</h1>
+  <p class="muted">意图层可用结构化表单（可靠）或关键词文本（模拟 NLP）。规则引擎负责生成 SQL 并在样例库执行。</p>
+
+  <form method="post">
+    <div class="tabs">
+      <label><input type="radio" name="mode" value="form" {% if form.mode=='form' %}checked{% endif %}> 结构化表单</label>
+      <label><input type="radio" name="mode" value="text" {% if form.mode=='text' %}checked{% endif %}> 自然语言（关键词）</label>
+    </div>
+
+    <label>自然语言（「自然语言」模式时解析；表单模式可作备注）</label>
+    <textarea name="text">{{ form.text }}</textarea>
+
+    <label>指标（多选）</label>
+    <div class="checks">
+      {% for c in composites %}
+      <label><input type="checkbox" name="metric_ids" value="{{ c.id }}" {% if c.id in form.metric_ids %}checked{% endif %}> {{ c.name }}</label>
+      {% endfor %}
+      {% for d in derived %}
+      <label><input type="checkbox" name="metric_ids" value="{{ d.id }}" {% if d.id in form.metric_ids %}checked{% endif %}> {{ d.name }}</label>
+      {% endfor %}
+    </div>
+
+    <label>币种</label>
+    <select name="currency">
+      {% for c in currencies %}
+      <option value="{{ c.code }}" {% if form.currency==c.code %}selected{% endif %}>{{ c.name }} ({{ c.code }})</option>
+      {% endfor %}
+    </select>
+
+    <label>附加分析维度（须已绑定到所选指标）</label>
+    <div class="checks">
+      {% for d in analysis_dims %}
+      <label><input type="checkbox" name="dims" value="{{ d.code }}" {% if d.code in form.dims %}checked{% endif %}> {{ d.name }}</label>
+      {% else %}
+      <span class="muted">无可用分析维度，请先在「分析维度」维护并绑定到指标</span>
+      {% endfor %}
+    </div>
+
+    <label>筛选：项目编号</label>
+    <input type="text" name="project_number" value="{{ form.project_number }}" placeholder="P001">
+    <label>筛选：区域</label>
+    <input type="text" name="region" value="{{ form.region }}" placeholder="华东">
+    <label>筛选：电站</label>
+    <input type="text" name="power_plant" value="{{ form.power_plant }}">
+
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">生成并执行</button>
+    </p>
+  </form>
+</div>
+
+{% if result %}
+<div class="card">
+  <h2>① 意图解析</h2>
+  <table>
+    <tbody>
+      <tr><th style="width:8rem">指标</th><td>{{ intent_view['指标'] | join('、') or '—' }}</td></tr>
+      <tr><th>币种</th><td>{{ intent_view['币种'] }}</td></tr>
+      <tr><th>分析维度</th><td>{{ intent_view['分析维度'] | join('、') or '无' }}</td></tr>
+      <tr><th>筛选条件</th>
+        <td>
+          {% if intent_view['筛选条件'] %}
+            {% for k,v in intent_view['筛选条件'].items() %}{{ k }} = {{ v }}{% if not loop.last %}；{% endif %}{% endfor %}
+          {% else %}无{% endif %}
+        </td>
+      </tr>
+      <tr><th>原始问句</th><td>{{ intent_view['原始问句'] or '—' }}</td></tr>
+    </tbody>
+  </table>
+  <details style="margin-top:0.8rem">
+    <summary class="muted">查看中文 JSON</summary>
+    <pre class="json">{{ intent_view | zh_json }}</pre>
+  </details>
+</div>
+
+{% if not result.ok %}
+<div class="card">
+  <p class="err-box is-err">错误：{{ result.error }}</p>
+</div>
+{% else %}
+<div class="card">
+  <h2>② 生成 SQL</h2>
+  <pre class="sql">{{ result.sql }}</pre>
+</div>
+<div class="card">
+  <h2>③ 口径 / 汇率审计</h2>
+  {% for a in audit_view %}
+  <div style="border:1px solid var(--line); border-radius:8px; padding:0.8rem; margin-bottom:0.7rem;">
+    <p style="margin:0 0 0.4rem"><strong>{{ a['指标名称'] }}</strong>
+      <span class="badge">{{ a['类型'] }}</span>
+    </p>
+    <table>
+      <tbody>
+        {% for k,v in a.items() %}
+          {% if k not in ('指标名称','类型','子指标审计') %}
+          <tr>
+            <th style="width:8rem">{{ k }}</th>
+            <td>{% if v is iterable and v is not string %}{{ v | join('、') if v else '—' }}{% else %}{{ v if v is not none else '—' }}{% endif %}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if a.get('子指标审计') %}
+    <details style="margin-top:0.5rem">
+      <summary>子指标审计（{{ a['子指标审计']|length }}）</summary>
+      <pre class="json">{{ a['子指标审计'] | zh_json }}</pre>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <details>
+    <summary class="muted">查看完整中文审计 JSON</summary>
+    <pre class="json">{{ audit_view | zh_json }}</pre>
+  </details>
+</div>
+<div class="card">
+  <h2>④ 执行结果</h2>
+  <table>
+    <thead>
+      <tr>{% for c in col_headers %}<th>{{ c }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for row in result.rows %}
+      <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+      {% else %}
+      <tr><td colspan="{{ col_headers|length }}">无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

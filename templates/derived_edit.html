@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}编辑派生指标{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ '编辑' if row else '新增' }}派生指标</h1>
+  <form method="post">
+    {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+    <label>名称</label>
+    <input type="text" name="name" required value="{{ row.name if row else '' }}">
+    <label>来源原子</label>
+    <select name="atomic_id" required>
+      {% for a in atomics %}
+      <option value="{{ a.id }}" {% if row and row.atomic_id==a.id %}selected{% endif %}>{{ a.name }} ({{ a.source_field }})</option>
+      {% endfor %}
+    </select>
+    <label>业务阶段</label>
+    <select name="stage_type" id="stage_type">
+      {% for s, amount, rate in stages %}
+      <option value="{{ s }}"
+        data-amount="{{ amount }}" data-rate="{{ rate }}"
+        {% if row and row.stage_type==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <label>金额字段</label>
+    <input type="text" name="amount_col" id="amount_col" value="{{ row.amount_col if row else stages[0][1] }}">
+    <label>汇率字段</label>
+    <input type="text" name="rate_col" id="rate_col" value="{{ row.rate_col if row else stages[0][2] }}">
+    {% include "_dim_bind.html" %}
+    <label><input type="checkbox" name="exposed" value="1" {% if not row or row.exposed %}checked{% endif %}> 对外暴露</label>
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">保存</button>
+      <a class="btn secondary" href="{{ url_for('derived_list') }}">返回</a>
+    </p>
+  </form>
+</div>
+<script>
+  const sel = document.getElementById('stage_type');
+  function sync() {
+    const opt = sel.selectedOptions[0];
+    document.getElementById('amount_col').value = opt.dataset.amount;
+    document.getElementById('rate_col').value = opt.dataset.rate;
+  }
+  sel.addEventListener('change', sync);
+</script>
+{% endblock %}

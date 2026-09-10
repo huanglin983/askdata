@@ -1,0 +1,16 @@
+{# 指标编辑页复用：绑定分析维度 #}
+<label>绑定分析维度 <span class="muted">（至少含一个粒度维度；分析维度决定问数可选列）</span></label>
+<div class="checks">
+  {% for d in dims %}
+  <label>
+    <input type="checkbox" name="dim_ids" value="{{ d.id }}"
+      {% if d.id in selected_dims %}checked{% endif %}>
+    {{ d.name }}
+    <span class="badge">{{ '粒度' if d.dim_role=='grain' else '分析' }}</span>
+    <code>{{ d.code }}</code>
+    {% if not d.enabled %}<span class="muted">(已禁用)</span>{% endif %}
+  </label>
+  {% else %}
+  <span class="muted">请先在「分析维度」中维护维度定义</span>
+  {% endfor %}
+</div>

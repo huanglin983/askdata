@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}原子指标{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between">
+    <h1 style="margin:0">原子指标</h1>
+    <a class="btn" href="{{ url_for('atomic_edit') }}">新增</a>
+  </div>
+  <p class="muted">只映射原始字段，不含 WHERE / 计算 / 汇率；粒度与分析维度通过绑定管理。</p>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>名称</th><th>来源表</th><th>字段</th><th>聚合</th><th>绑定维度</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><code>{{ r.id }}</code></td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.source_table }}</td>
+        <td>{{ r.source_field }}</td>
+        <td>{{ r.agg_type }}</td>
+        <td class="muted">{{ r.dim_labels }}</td>
+        <td class="actions">
+          <a href="{{ url_for('atomic_edit', metric_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('atomic_delete', metric_id=r.id) }}" onsubmit="return confirm('删除？');">
+            <button type="submit" class="danger">删</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

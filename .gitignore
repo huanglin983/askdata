@@ -1,0 +1,7 @@
+# local demo database
+data/*.db
+data/*.db-*
+__pycache__/
+*.pyc
+.venv/
+venv/
