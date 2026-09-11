@@ -1,0 +1,5 @@
+{% set filter_text = filter_text if filter_text is defined else '' %}
+<label>过滤条件</label>
+<p class="muted" style="margin:0 0 0.4rem">多行 SQL 条件（不含 WHERE），如 <code>m.region = '华东'</code>；空表示不过滤。派生会在原子条件之上叠加。</p>
+<textarea name="filter_text" id="filter_text" rows="4" style="font-family:var(--mono);max-width:100%" placeholder="m.project_number = 'P001'
+AND m.region = '华东'">{{ filter_text }}</textarea>

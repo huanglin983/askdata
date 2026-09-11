@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}指标地图{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>指标地图</h1>
+  <p class="muted">
+    从复合指标向下展开到派生 / 原子，形成依赖树；未被任何树引用的指标列在「孤立指标」。
+    当前 {{ stats.trees }} 棵树 · {{ stats.orphans }} 个孤立 ·
+    复合 {{ stats.composite }} / 派生 {{ stats.derived }} / 原子 {{ stats.atomic }}
+  </p>
+  <p class="muted" style="margin:0.4rem 0 0">
+    点击指标卡可高亮上下游；空白处拖动画布平移；节点可折叠 / 展开；右上角缩放（或 Ctrl + 滚轮）。
+  </p>
+</div>
+
+{% macro map_card(node, has_children=false) %}
+  {% set edit_ep = {
+    'atomic': 'atomic_edit',
+    'derived': 'derived_edit',
+    'composite': 'composite_edit'
+  }[node.type] %}
+  <div class="map-card map-type-{{ node.type }}" data-metric-id="{{ node.id }}" tabindex="0" role="button">
+    <div class="map-card-hd">
+      <div class="map-card-titles">
+        <div class="map-card-name">{{ node.name }}</div>
+        <div class="map-card-id">{{ node.id }}</div>
+      </div>
+      <span class="map-badge">{{ node.type_label }}</span>
+    </div>
+    <div class="map-card-bd">
+      <div class="map-card-label">影响因子</div>
+      <div class="map-card-detail">{% if node.detail %}{{ node.detail }}{% else %}—{% endif %}</div>
+      <a class="map-card-edit" href="{{ url_for(edit_ep, metric_id=node.id) }}" onclick="event.stopPropagation()">编辑</a>
+    </div>
+    <span class="map-port map-port-t" aria-hidden="true"></span>
+    <span class="map-port map-port-b" aria-hidden="true"></span>
+    <span class="map-port map-port-l" aria-hidden="true"></span>
+    <span class="map-port map-port-r" aria-hidden="true"></span>
+    {% if has_children %}
+    <button type="button" class="map-toggle" aria-expanded="true" title="折叠子树" aria-label="折叠子树">−</button>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{% macro tree_nodes(nodes) %}
+  {% for node in nodes %}
+  {% set kids = node.children or [] %}
+  {% set has_kids = kids|length > 0 %}
+  <li data-metric-id="{{ node.id }}"{% if has_kids %} class="has-children"{% endif %}>
+    {{ map_card(node, has_children=has_kids) }}
+    {% if has_kids %}
+    <ul>
+      {{ tree_nodes(kids) }}
+    </ul>
+    {% endif %}
+  </li>
+  {% endfor %}
+{% endmacro %}
+
+{% macro zoom_toolbar() %}
+  <div class="map-zoom-toolbar" role="group" aria-label="画布缩放">
+    <button type="button" class="map-zoom-btn" data-zoom="out" title="缩小" aria-label="缩小">−</button>
+    <span class="map-zoom-label" data-zoom-label>100%</span>
+    <button type="button" class="map-zoom-btn" data-zoom="in" title="放大" aria-label="放大">+</button>
+    <button type="button" class="map-zoom-btn map-zoom-fit" data-zoom="fit" title="最佳大小" aria-label="最佳大小">最佳大小</button>
+  </div>
+{% endmacro %}
+
+{% if trees %}
+{% for tree in trees %}
+<div class="card map-canvas" data-map-scope="tree">
+  <div class="map-canvas-hd">
+    <h2 class="map-section-title">依赖树 · {{ tree.name }}</h2>
+    {{ zoom_toolbar() }}
+  </div>
+  <div class="map-viewport">
+    <div class="org-zoom-shell">
+      <div class="org-zoom-inner">
+        <div class="org-wrap">
+          <ul class="org-tree">
+            {{ tree_nodes([tree]) }}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+  <p class="muted">暂无复合指标树。请先配置复合指标及其子指标依赖。</p>
+</div>
+{% endif %}
+
+<div class="card map-canvas" data-map-scope="orphan">
+  <h2 class="map-section-title">孤立指标</h2>
+  {% if orphans %}
+  <p class="muted" style="margin-top:0">未被上述依赖树引用的指标（派生若仅自身孤立，仍可展示其下挂原子）。</p>
+  <div class="orphan-grid">
+    {% for node in orphans %}
+    <div class="orphan-item">
+      {% if node.children %}
+      <div class="org-wrap orphan-mini">
+        <ul class="org-tree">
+          {{ tree_nodes([node]) }}
+        </ul>
+      </div>
+      {% else %}
+      {{ map_card(node) }}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">无孤立指标，全部已纳入依赖树。</p>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 2;
+  const ZOOM_STEP = 0.1;
+
+  function clearFocus(scope) {
+    scope.classList.remove('is-focusing');
+    scope.querySelectorAll('.is-active, .is-related, .on-path').forEach(el => {
+      el.classList.remove('is-active', 'is-related', 'on-path');
+    });
+  }
+
+  function markPathFromCard(card) {
+    const li = card.closest('li');
+    if (!li) {
+      card.classList.add('is-active', 'is-related');
+      return;
+    }
+    let cur = li;
+    while (cur && cur.tagName === 'LI') {
+      cur.classList.add('on-path');
+      const c = cur.querySelector(':scope > .map-card');
+      if (c) c.classList.add('is-related');
+      const parentUl = cur.parentElement;
+      cur = parentUl && parentUl.closest('li');
+    }
+    li.querySelectorAll('li').forEach(d => {
+      d.classList.add('on-path');
+      const c = d.querySelector(':scope > .map-card');
+      if (c) c.classList.add('is-related');
+    });
+    card.classList.add('is-active');
+  }
+
+  function focusCard(card) {
+    const scope = card.closest('.map-canvas');
+    if (!scope) return;
+    const metricId = card.getAttribute('data-metric-id');
+    const already = card.classList.contains('is-active') && scope.classList.contains('is-focusing');
+    clearFocus(scope);
+    if (already) return;
+
+    scope.classList.add('is-focusing');
+    scope.querySelectorAll('.map-card[data-metric-id="' + CSS.escape(metricId) + '"]').forEach(markPathFromCard);
+  }
+
+  function setCollapsed(li, collapsed) {
+    const btn = li.querySelector(':scope > .map-card > .map-toggle');
+    li.classList.toggle('is-collapsed', collapsed);
+    if (btn) {
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.setAttribute('title', collapsed ? '展开子树' : '折叠子树');
+      btn.setAttribute('aria-label', collapsed ? '展开子树' : '折叠子树');
+      btn.textContent = collapsed ? '+' : '−';
+    }
+  }
+
+  function initCollapse(scope) {
+    scope.querySelectorAll('.map-toggle').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const li = btn.closest('li');
+        if (!li) return;
+        setCollapsed(li, !li.classList.contains('is-collapsed'));
+        const canvas = scope.closest('.map-canvas') || scope;
+        if (canvas._mapZoom) canvas._mapZoom.refreshShell();
+      });
+    });
+  }
+
+  function createZoomController(canvas) {
+    const viewport = canvas.querySelector('.map-viewport');
+    const shell = canvas.querySelector('.org-zoom-shell');
+    const inner = canvas.querySelector('.org-zoom-inner');
+    const label = canvas.querySelector('[data-zoom-label]');
+    if (!viewport || !shell || !inner) return null;
+
+    let scale = 1;
+
+    function applyScale(next) {
+      scale = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 100) / 100;
+      inner.style.transform = 'scale(' + scale + ')';
+      if (label) label.textContent = Math.round(scale * 100) + '%';
+      refreshShell();
+    }
+
+    function refreshShell() {
+      // Measure unscaled size, then shrink shell so scrollbars match visual bounds
+      const w = inner.scrollWidth;
+      const h = inner.scrollHeight;
+      const scaledW = Math.ceil(w * scale);
+      const scaledH = Math.ceil(h * scale);
+      shell.style.width = Math.max(scaledW, viewport.clientWidth) + 'px';
+      shell.style.height = scaledH + 'px';
+      inner.style.marginLeft = Math.max(0, (viewport.clientWidth - scaledW) / 2) + 'px';
+    }
+
+    function fit() {
+      applyScale(1);
+      // Wait a frame so layout reflects expanded/collapsed state at 100%
+      requestAnimationFrame(() => {
+        const pad = 24;
+        const vw = Math.max(viewport.clientWidth - pad, 80);
+        const vh = Math.max(viewport.clientHeight - pad, 80);
+        const tw = inner.scrollWidth || 1;
+        const th = inner.scrollHeight || 1;
+        // Fit without enlarging past 100%
+        const next = Math.min(vw / tw, vh / th, 1);
+        applyScale(Math.max(next, ZOOM_MIN));
+        viewport.scrollLeft = Math.max(0, (shell.offsetWidth - viewport.clientWidth) / 2);
+        viewport.scrollTop = 0;
+      });
+    }
+
+    canvas.querySelectorAll('[data-zoom]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const action = btn.getAttribute('data-zoom');
+        if (action === 'in') applyScale(scale + ZOOM_STEP);
+        else if (action === 'out') applyScale(scale - ZOOM_STEP);
+        else if (action === 'fit') fit();
+      });
+    });
+
+    // Ctrl + wheel zoom inside viewport
+    viewport.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      applyScale(scale + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    }, { passive: false });
+
+    // Drag to pan canvas
+    const DRAG_THRESHOLD = 4;
+    let drag = null;
+
+    function isPanBlockedTarget(t) {
+      return !!(t && t.closest && t.closest('.map-toggle, .map-zoom-toolbar, .map-zoom-btn, a.map-card-edit'));
+    }
+
+    viewport.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.button !== 1) return;
+      if (isPanBlockedTarget(e.target)) return;
+      if (e.button === 1) e.preventDefault();
+      drag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+        moved: false,
+      };
+      try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    viewport.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      if (!drag.moved && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+        drag.moved = true;
+        viewport.classList.add('is-panning');
+      }
+      if (!drag.moved) return;
+      e.preventDefault();
+      viewport.scrollLeft = drag.scrollLeft - dx;
+      viewport.scrollTop = drag.scrollTop - dy;
+    });
+
+    function endPan(e) {
+      if (!drag || (e && e.pointerId !== drag.pointerId)) return;
+      const wasMoved = drag.moved;
+      drag = null;
+      viewport.classList.remove('is-panning');
+      if (wasMoved) {
+        // Suppress the click that follows a drag (card focus / clear)
+        viewport._suppressClickUntil = Date.now() + 280;
+      }
+    }
+
+    viewport.addEventListener('pointerup', endPan);
+    viewport.addEventListener('pointercancel', endPan);
+    viewport.addEventListener('lostpointercapture', endPan);
+
+    applyScale(1);
+    // Initial fit so wide trees are usable immediately
+    requestAnimationFrame(fit);
+
+    return { applyScale, fit, refreshShell, get scale() { return scale; } };
+  }
+
+  document.querySelectorAll('.map-canvas').forEach(scope => {
+    initCollapse(scope);
+    if (scope.getAttribute('data-map-scope') === 'tree') {
+      scope._mapZoom = createZoomController(scope);
+    }
+
+    scope.addEventListener('click', (e) => {
+      if (e.target.closest('.map-toggle, .map-zoom-toolbar, .map-zoom-btn')) return;
+      const viewport = scope.querySelector('.map-viewport');
+      if (viewport && viewport._suppressClickUntil && Date.now() < viewport._suppressClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      const card = e.target.closest('.map-card');
+      if (card && scope.contains(card)) {
+        e.preventDefault();
+        focusCard(card);
+        return;
+      }
+      if (!e.target.closest('.map-card')) clearFocus(scope);
+    });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.map-canvas.is-focusing').forEach(clearFocus);
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.map-canvas').forEach(c => {
+      if (c._mapZoom) c._mapZoom.refreshShell();
+    });
+  });
+})();
+</script>
+{% endblock %}

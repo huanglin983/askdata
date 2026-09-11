@@ -5,6 +5,7 @@ import re
 
 import db
 from engine import Intent
+import meta
 
 
 def from_form(
@@ -47,10 +48,8 @@ def from_text(text: str) -> Intent:
     else:
         intent.currency = "CNY"
 
-    # dims from catalog names / codes
-    for d in db.list_analysis_dims(enabled_only=True):
-        if d["dim_role"] != "attr":
-            continue
+    # dims from meta field names / codes
+    for d in meta.list_ask_analysis_fields():
         if d["name"] in text or d["code"] in text:
             if d["code"] not in intent.dims:
                 intent.dims.append(d["code"])

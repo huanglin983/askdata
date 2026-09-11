@@ -1,23 +1,30 @@
 {% extends "base.html" %}
-{% block title %}复合指标{% endblock %}
+{% block title %}复合指标 · 指标管理{% endblock %}
 {% block content %}
+{% set active = 'composite' %}
+{% include "_metric_tabs.html" %}
 <div class="card">
   <div class="actions" style="justify-content:space-between">
-    <h1 style="margin:0">复合指标</h1>
+    <div>
+      <h1 style="margin:0">复合指标</h1>
+      <p class="muted" style="margin:0.35rem 0 0">同粒度指标的四则运算，校验业务归属一致。如 <code>(A+B)/C</code></p>
+    </div>
     <a class="btn" href="{{ url_for('composite_edit') }}">新增</a>
   </div>
-  <p class="muted">不写 SQL，只配置公式 + 子指标；可单独绑定分析维度（问数交叉校验取交集）。</p>
-  <table>
+  <table class="compact">
     <thead>
-      <tr><th>名称</th><th>公式</th><th>子指标</th><th>绑定维度</th><th></th></tr>
+      <tr><th>名称</th><th>公式</th><th>业务线</th><th>业务对象</th><th>业务过程</th><th>子指标</th><th>绑定维度</th><th></th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td>{{ r.name }} <span class="badge">{{ r.id }}</span></td>
-        <td><code>{{ r.formula }}</code></td>
-        <td><code>{{ r.subs | join(', ') }}</code></td>
-        <td class="muted">{{ r.dim_labels }}</td>
+        <td title="{{ r.name }} ({{ r.id }})">{{ r.name }} <span class="badge">{{ r.id }}</span></td>
+        <td title="{{ r.formula }}"><code>{{ r.formula }}</code></td>
+        <td class="muted" title="{{ r.biz_line or '-' }}">{{ r.biz_line or '-' }}</td>
+        <td class="muted" title="{{ r.biz_object or '-' }}">{{ r.biz_object or '-' }}</td>
+        <td class="muted" title="{{ r.biz_process or '-' }}">{{ r.biz_process or '-' }}</td>
+        <td title="{{ r.subs | join(', ') }}"><code>{{ r.subs | join(', ') }}</code></td>
+        <td class="muted" title="{{ r.dim_labels }}">{{ r.dim_labels }}</td>
         <td class="actions">
           <a href="{{ url_for('composite_edit', metric_id=r.id) }}">编辑</a>
           <form method="post" action="{{ url_for('composite_delete', metric_id=r.id) }}" onsubmit="return confirm('删除？');">
@@ -26,7 +33,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5">暂无数据</td></tr>
+      <tr><td colspan="8">暂无数据</td></tr>
       {% endfor %}
     </tbody>
   </table>

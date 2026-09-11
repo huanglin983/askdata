@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}维度关系{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between">
+    <h1 style="margin:0">维度表关系</h1>
+    <div class="actions">
+      <a class="btn secondary" href="{{ url_for('meta_table_list') }}">表元数据</a>
+      <a class="btn" href="{{ url_for('meta_rel_edit') }}">新增关系</a>
+    </div>
+  </div>
+  <p class="muted">配置事实表 ↔ 维度表关联键；问数时从事实表与关联维度表中取「用于分析维度」的字段。</p>
+  <table class="compact">
+    <thead>
+      <tr><th>事实表</th><th>维度表</th><th>关联键</th><th>JOIN</th><th>启用</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td title="{{ r.fact_name }} {{ r.fact_physical }}">{{ r.fact_name }} <code>{{ r.fact_physical }}</code></td>
+        <td title="{{ r.dim_name }} {{ r.dim_physical }}">{{ r.dim_name }} <code>{{ r.dim_physical }}</code></td>
+        <td title="{% for k in r.join_keys_list %}{{ k.left }}={{ k.right }}{% if not loop.last %}, {% endif %}{% endfor %}">
+          {% for k in r.join_keys_list %}
+          <code>{{ k.left }}={{ k.right }}</code>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </td>
+        <td>{{ r.join_type }}</td>
+        <td>{{ '是' if r.enabled else '否' }}</td>
+        <td class="actions">
+          <a href="{{ url_for('meta_rel_edit', rel_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('meta_rel_delete', rel_id=r.id) }}" onsubmit="return confirm('删除？');">
+            <button type="submit" class="danger">删</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">暂无关系</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

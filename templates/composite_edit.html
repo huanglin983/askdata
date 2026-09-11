@@ -3,28 +3,320 @@
 {% block content %}
 <div class="card">
   <h1>{{ '编辑' if row else '新增' }}复合指标</h1>
-  <form method="post">
-    {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+  <form method="post" id="composite-form">
+    {% if row %}<input type="hidden" name="id" id="metric_id" value="{{ row.id }}">{% endif %}
+    {% if not row %}<input type="hidden" id="metric_id" value="">{% endif %}
     <label>名称</label>
-    <input type="text" name="name" required value="{{ row.name if row else '' }}">
+    <input type="text" name="name" id="name" required value="{{ row.name if row else '' }}">
     <label>公式（使用子指标中文名，支持 + - * / 与括号）</label>
-    <input type="text" name="formula" required value="{{ row.formula if row else '' }}" placeholder="Contract总成本 - PJ总成本">
-    <label>依赖子指标（派生 / 其他复合）</label>
-    <div class="checks">
-      {% for d in derived %}
-      <label><input type="checkbox" name="sub_metric_ids" value="{{ d.id }}" {% if d.id in selected %}checked{% endif %}> {{ d.name }}</label>
+    <input type="text" name="formula" id="formula" required value="{{ row.formula if row else '' }}" placeholder="Contract原始成本 - PJ原始成本">
+
+    <label>业务线（引用公式首个指标，只读）</label>
+    <input type="text" id="cmp_biz_line" readonly
+      value="{{ row.biz_line if row and row.biz_line else (taxonomy_defaults.biz_line if taxonomy_defaults else '') }}">
+    <label>主题域（引用公式首个指标，只读）</label>
+    <input type="text" id="cmp_theme_domain" readonly
+      value="{{ row.theme_domain if row and row.theme_domain else (taxonomy_defaults.theme_domain if taxonomy_defaults else '') }}">
+    <label>业务对象（可改，默认带出首个指标）</label>
+    <select name="biz_object" id="cmp_biz_object">
+      <option value="">— 请选择 —</option>
+      {% set cur_obj = row.biz_object if row and row.biz_object else (taxonomy_defaults.biz_object if taxonomy_defaults else '') %}
+      {% for n in biz_catalog.object %}
+      <option value="{{ n.name_zh }}" {% if cur_obj==n.name_zh %}selected{% endif %}>{{ n.name_zh }}</option>
       {% endfor %}
-      {% for c in composites %}
-      <label><input type="checkbox" name="sub_metric_ids" value="{{ c.id }}" {% if c.id in selected %}checked{% endif %}> {{ c.name }}（复合）</label>
+    </select>
+    <label>业务过程（可改，默认带出首个指标）</label>
+    <select name="biz_process" id="cmp_biz_process">
+      <option value="">— 请选择 —</option>
+      {% set cur_proc = row.biz_process if row and row.biz_process else (taxonomy_defaults.biz_process if taxonomy_defaults else '') %}
+      {% for n in biz_catalog.process %}
+      <option value="{{ n.name_zh }}" {% if cur_proc==n.name_zh %}selected{% endif %}>{{ n.name_zh }}</option>
       {% endfor %}
+    </select>
+    <p class="muted">业务线/主题域随公式首个指标自动引用；业务对象与业务过程可手工调整。</p>
+
+    <label>依赖子指标 <span class="muted">（勾选后自动追加到公式末尾；取消勾选会从公式中移除）</span></label>
+    <div id="sub-metrics">
+      <div class="sub-metric-group">
+        <div class="sub-metric-group-title">原子</div>
+        <div class="checks">
+          {% for a in atomics %}
+          <label>
+            <input type="checkbox" name="sub_metric_ids" value="{{ a.id }}"
+              data-name="{{ a.name }}"
+              {% if a.id in selected %}checked{% endif %}>
+            {{ a.name }}
+            <span class="badge">原子</span>
+          </label>
+          {% else %}
+          <span class="muted">暂无原子指标</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="sub-metric-group">
+        <div class="sub-metric-group-title">派生</div>
+        <div class="checks">
+          {% for d in derived %}
+          <label>
+            <input type="checkbox" name="sub_metric_ids" value="{{ d.id }}"
+              data-name="{{ d.name }}"
+              {% if d.id in selected %}checked{% endif %}>
+            {{ d.name }}
+            <span class="badge">派生</span>
+          </label>
+          {% else %}
+          <span class="muted">暂无派生指标</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="sub-metric-group">
+        <div class="sub-metric-group-title">复合</div>
+        <div class="checks">
+          {% for c in composites %}
+          <label>
+            <input type="checkbox" name="sub_metric_ids" value="{{ c.id }}"
+              data-name="{{ c.name }}"
+              {% if c.id in selected %}checked{% endif %}>
+            {{ c.name }}
+            <span class="badge">复合</span>
+          </label>
+          {% else %}
+          <span class="muted">暂无其他复合指标</span>
+          {% endfor %}
+        </div>
+      </div>
     </div>
     {% include "_dim_bind.html" %}
-    <label><input type="checkbox" name="check_currency_same" value="1" {% if not row or row.check_currency_same %}checked{% endif %}> 强制币种一致</label>
-    <label><input type="checkbox" name="check_granularity_same" value="1" {% if not row or row.check_granularity_same %}checked{% endif %}> 强制粒度一致</label>
+    <label><input type="checkbox" name="check_currency_same" id="check_currency_same" value="1" {% if not row or row.check_currency_same %}checked{% endif %}> 强制币种一致</label>
+    <label><input type="checkbox" name="check_granularity_same" id="check_granularity_same" value="1" {% if not row or row.check_granularity_same %}checked{% endif %}> 强制粒度一致</label>
+
+    <label>预览币种</label>
+    <select id="preview_currency">
+      {% for c in currencies %}
+      <option value="{{ c.code }}" {% if c.code=='CNY' %}selected{% endif %}>{{ c.name }} ({{ c.code }})</option>
+      {% endfor %}
+    </select>
+    <label>最终 SQL</label>
+    <p class="muted">按公式展开子指标（各阶段先换算再运算）+ 币种规则生成；变更上方条件时自动刷新（只读）。</p>
+    <textarea id="sql_expr" rows="12" readonly style="font-family:var(--mono);max-width:100%;background:#f8fafc"></textarea>
+    <p class="actions">
+      <button type="button" class="secondary" id="regen-sql">重新生成</button>
+      <button type="button" id="run-sql">执行</button>
+    </p>
+    <div id="sql-preview-box" class="sql-preview-box" hidden>
+      <p id="sql-preview-status" class="muted" style="margin:0.4rem 0"></p>
+      <div id="sql-preview-table-wrap" style="overflow:auto;max-width:100%"></div>
+    </div>
+
     <p class="actions" style="margin-top:1rem">
       <button type="submit">保存</button>
       <a class="btn secondary" href="{{ url_for('composite_list') }}">返回</a>
     </p>
   </form>
 </div>
+<script>
+(function () {
+  const formulaInput = document.getElementById('formula');
+  const currencySel = document.getElementById('preview_currency');
+  const checkCur = document.getElementById('check_currency_same');
+  const checkGrain = document.getElementById('check_granularity_same');
+  const metricIdInput = document.getElementById('metric_id');
+  const sqlInput = document.getElementById('sql_expr');
+  const previewBox = document.getElementById('sql-preview-box');
+  const previewStatus = document.getElementById('sql-preview-status');
+  const previewTableWrap = document.getElementById('sql-preview-table-wrap');
+  let regenTimer = null;
+
+  function selectedSubIds() {
+    return Array.from(document.querySelectorAll('input[name="sub_metric_ids"]:checked'))
+      .map(el => el.value);
+  }
+
+  function previewPayload(execute) {
+    return {
+      id: (metricIdInput && metricIdInput.value) || 'preview',
+      formula: formulaInput.value || '',
+      sub_metric_ids: selectedSubIds(),
+      currency: currencySel.value || 'CNY',
+      check_currency_same: checkCur.checked,
+      check_granularity_same: checkGrain.checked,
+      execute: !!execute
+    };
+  }
+
+  async function regenerateSql() {
+    sqlInput.value = '生成中…';
+    try {
+      const resp = await fetch('{{ url_for("composite_preview_sql") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPayload(false))
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        sqlInput.value = '';
+        previewBox.hidden = false;
+        previewStatus.textContent = '生成失败：' + (data.error || '未知错误');
+        previewStatus.className = 'err-box is-err';
+        previewTableWrap.innerHTML = '';
+        return;
+      }
+      sqlInput.value = data.sql || '';
+      previewStatus.textContent = '';
+      previewStatus.className = 'muted';
+    } catch (e) {
+      sqlInput.value = '';
+      previewBox.hidden = false;
+      previewStatus.textContent = '请求失败：' + e;
+      previewStatus.className = 'err-box is-err';
+    }
+  }
+
+  function scheduleRegen() {
+    clearTimeout(regenTimer);
+    regenTimer = setTimeout(regenerateSql, 250);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+  }
+
+  document.getElementById('regen-sql').addEventListener('click', regenerateSql);
+
+  document.getElementById('run-sql').addEventListener('click', async () => {
+    previewBox.hidden = false;
+    previewStatus.textContent = '执行中…';
+    previewStatus.className = 'muted';
+    previewTableWrap.innerHTML = '';
+    try {
+      const resp = await fetch('{{ url_for("composite_preview_sql") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPayload(true))
+      });
+      const data = await resp.json();
+      if (data.sql) sqlInput.value = data.sql;
+      if (!data.ok) {
+        previewStatus.textContent = '执行失败：' + (data.error || '未知错误');
+        previewStatus.className = 'err-box is-err';
+        return;
+      }
+      const tip = data.truncated
+        ? ('成功，展示前 ' + data.row_count + ' 行（已截断）')
+        : ('成功，共 ' + data.row_count + ' 行');
+      previewStatus.textContent = tip;
+      previewStatus.className = 'muted';
+      if (!data.columns || !data.columns.length) {
+        previewTableWrap.innerHTML = '<p class="muted">无列返回</p>';
+        return;
+      }
+      let html = '<table class="preview-table"><thead><tr>';
+      data.columns.forEach(c => { html += '<th>' + escapeHtml(c) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      (data.rows || []).forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+          html += '<td>' + escapeHtml(cell === null || cell === undefined ? '' : String(cell)) + '</td>';
+        });
+        html += '</tr>';
+      });
+      if (!(data.rows || []).length) html += '<tr><td colspan="' + data.columns.length + '">无数据</td></tr>';
+      html += '</tbody></table>';
+      previewTableWrap.innerHTML = html;
+    } catch (e) {
+      previewStatus.textContent = '请求失败：' + e;
+      previewStatus.className = 'err-box is-err';
+    }
+  });
+
+  formulaInput.addEventListener('input', scheduleRegen);
+  currencySel.addEventListener('change', scheduleRegen);
+  checkCur.addEventListener('change', scheduleRegen);
+  checkGrain.addEventListener('change', scheduleRegen);
+
+  function formulaHasName(formula, name) {
+    if (!name) return false;
+    // avoid partial overlaps (e.g. 成本GAP vs 成本GAP率)
+    const names = Array.from(document.querySelectorAll('input[name="sub_metric_ids"][data-name]'))
+      .map(el => el.getAttribute('data-name'))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    let rest = formula;
+    const found = new Set();
+    for (const n of names) {
+      if (rest.includes(n)) {
+        found.add(n);
+        rest = rest.split(n).join(' ');
+      }
+    }
+    return found.has(name);
+  }
+
+  function appendNameToFormula(name) {
+    if (!name) return;
+    const cur = (formulaInput.value || '').trim();
+    if (!cur) {
+      formulaInput.value = name;
+      return;
+    }
+    if (formulaHasName(cur, name)) return;
+    // already ends with operator / open paren → just append name
+    if (/[+\-*/(]\s*$/.test(cur)) {
+      formulaInput.value = cur.replace(/\s*$/, '') + ' ' + name;
+    } else {
+      formulaInput.value = cur + ' + ' + name;
+    }
+  }
+
+  function removeNameFromFormula(name) {
+    if (!name) return;
+    let cur = formulaInput.value || '';
+    if (!formulaHasName(cur, name)) return;
+    // remove name and tidy adjacent operators
+    const parts = [];
+    let i = 0;
+    while (i < cur.length) {
+      if (cur.slice(i, i + name.length) === name) {
+        // skip this occurrence
+        i += name.length;
+        continue;
+      }
+      parts.push(cur[i]);
+      i += 1;
+    }
+    cur = parts.join('');
+    cur = cur
+      .replace(/\s*[+\-*/]\s*[+\-*/]+/g, (m) => {
+        // collapse duplicate ops to first
+        const op = m.trim()[0];
+        return ' ' + op + ' ';
+      })
+      .replace(/^\s*[+\-*/]\s*/, '')
+      .replace(/\s*[+\-*/]\s*$/, '')
+      .replace(/\(\s*\)/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    formulaInput.value = cur;
+  }
+
+  document.getElementById('sub-metrics').addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (!el || el.name !== 'sub_metric_ids') {
+      scheduleRegen();
+      return;
+    }
+    const name = el.getAttribute('data-name') || '';
+    if (el.checked) {
+      appendNameToFormula(name);
+    } else {
+      removeNameFromFormula(name);
+    }
+    scheduleRegen();
+  });
+
+  regenerateSql();
+})();
+</script>
 {% endblock %}

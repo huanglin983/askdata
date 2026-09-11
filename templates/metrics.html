@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}指标管理{% endblock %}
+{% block content %}
+<div class="card">
+  <h1 style="margin:0 0 0.35rem">指标管理</h1>
+  <p class="muted" style="margin:0 0 1.1rem">统一管理原子 / 派生 / 复合三类指标。点击卡片进入对应列表；配置请遵循「原子 → 派生 → 复合」顺序。</p>
+
+  <div class="metric-hub">
+    <a class="metric-hub-card metric-hub-atomic" href="{{ url_for('atomic_list') }}">
+      <div class="metric-hub-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="10" width="36" height="28" rx="4" stroke="currentColor" stroke-width="2.2"/>
+          <path d="M6 18h36" stroke="currentColor" stroke-width="2.2"/>
+          <circle cx="14" cy="14" r="1.6" fill="currentColor"/>
+          <circle cx="20" cy="14" r="1.6" fill="currentColor"/>
+          <path d="M14 26h10M14 32h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M34 24l4 4-4 4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="metric-hub-body">
+        <div class="metric-hub-hd">
+          <h2>原子指标</h2>
+          <span class="metric-hub-count">{{ atomic_n }}</span>
+        </div>
+        <p class="metric-hub-help">绑定物理字段，尽量不写 where，维护基础业务属性。</p>
+        <span class="metric-hub-cta">进入管理 →</span>
+      </div>
+    </a>
+
+    <a class="metric-hub-card metric-hub-derived" href="{{ url_for('derived_list') }}">
+      <div class="metric-hub-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="8" width="26" height="18" rx="3" stroke="currentColor" stroke-width="2.2"/>
+          <rect x="14" y="16" width="26" height="18" rx="3" stroke="currentColor" stroke-width="2.2" fill="var(--card)"/>
+          <rect x="20" y="24" width="26" height="18" rx="3" stroke="currentColor" stroke-width="2.2" fill="var(--card)"/>
+          <path d="M26 33h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="metric-hub-body">
+        <div class="metric-hub-hd">
+          <h2>派生指标</h2>
+          <span class="metric-hub-count">{{ derived_n }}</span>
+        </div>
+        <p class="metric-hub-help">原子加业务切片（时间 + 修饰词维度），默认继承原子指标元数据。</p>
+        <span class="metric-hub-cta">进入管理 →</span>
+      </div>
+    </a>
+
+    <a class="metric-hub-card metric-hub-composite" href="{{ url_for('composite_list') }}">
+      <div class="metric-hub-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="8" width="32" height="32" rx="6" stroke="currentColor" stroke-width="2.2"/>
+          <path d="M16 20h16M16 28h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <circle cx="34" cy="28" r="5.5" stroke="currentColor" stroke-width="2"/>
+          <path d="M34 25.5v5M31.5 28h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="metric-hub-body">
+        <div class="metric-hub-hd">
+          <h2>复合指标</h2>
+          <span class="metric-hub-count">{{ composite_n }}</span>
+        </div>
+        <p class="metric-hub-help">同粒度指标的四则运算，校验业务归属一致。如 <code>(A+B)/C</code></p>
+        <span class="metric-hub-cta">进入管理 →</span>
+      </div>
+    </a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}编辑表元数据{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ '编辑' if row else '注册' }}表元数据</h1>
+  <form method="post">
+    {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+    <label>显示名称</label>
+    <input type="text" name="name" required value="{{ row.name if row else '' }}" placeholder="项目维度">
+    <label>物理表名</label>
+    {% if physicals %}
+    <select name="physical_name" id="physical_name" required>
+      {% for p in physicals %}
+      <option value="{{ p }}" {% if row and row.physical_name==p %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="text" name="physical_name" required value="{{ row.physical_name if row else '' }}">
+    {% endif %}
+    <label>表类型</label>
+    <select name="table_kind">
+      {% set kind = row.table_kind if row else 'dim' %}
+      <option value="fact" {% if kind=='fact' %}selected{% endif %}>事实表 fact</option>
+      <option value="dim" {% if kind=='dim' %}selected{% endif %}>维度表 dim</option>
+    </select>
+    <label>备注</label>
+    <input type="text" name="remark" value="{{ row.remark if row else '' }}">
+    <label><input type="checkbox" name="enabled" value="1" {% if not row or row.enabled %}checked{% endif %}> 启用</label>
+
+    {% if row and fields %}
+    <input type="hidden" name="grain_section" value="1">
+    <label>数据粒度（业务主键）</label>
+    <p class="muted">勾选组成业务主键的字段，顺序按字段排序号；保存后同步字段语义为 <code>grain</code>。物理 PK 徽标仅表示库表主键，可与业务主键不同。</p>
+    <div class="checks">
+      {% for f in fields %}
+      <label>
+        <input type="checkbox" name="grain_keys" value="{{ f.field_name }}"
+          {% if f.field_name in grain_keys %}checked{% endif %}>
+        <code>{{ f.field_name }}</code>
+        {% if f.display_name and f.display_name != f.field_name %} {{ f.display_name }}{% endif %}
+        {% if f.is_pk %} <span class="badge">物理PK</span>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    {% elif not row %}
+    <p class="muted">首次保存会同步字段；若物理表有主键，将自动作为业务主键，可再回来调整。</p>
+    {% endif %}
+
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">保存并同步字段</button>
+      <a class="btn secondary" href="{{ url_for('meta_table_list') }}">返回</a>
+    </p>
+  </form>
+</div>
+
+{% if row %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between">
+    <h2 style="margin:0">字段</h2>
+    <form method="post" action="{{ url_for('meta_table_sync_fields', table_id=row.id) }}">
+      <button type="submit" class="secondary">从物理表同步字段</button>
+    </form>
+  </div>
+  <table>
+    <thead>
+      <tr><th>字段</th><th>显示名</th><th>类型</th><th>语义</th><th>分析维度</th><th>启用</th><th>排序</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for f in fields %}
+      <tr>
+        <td>
+          <code>{{ f.field_name }}</code>
+          {% if f.is_pk %} <span class="badge">物理PK</span>{% endif %}
+          {% if f.field_name in grain_keys %} <span class="badge">业务主键</span>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('meta_field_update', field_id=f.id) }}" id="ff_{{ f.id }}">
+            <input type="hidden" name="table_id" value="{{ row.id }}">
+            <input type="text" name="display_name" value="{{ f.display_name }}" style="max-width:140px">
+          </form>
+        </td>
+        <td class="muted">{{ f.data_type or '-' }}</td>
+        <td>
+          <select name="semantic_role" style="max-width:110px" form="ff_{{ f.id }}">
+            {% for role in ['grain','attr','measure','rate','other'] %}
+            <option value="{{ role }}" {% if f.semantic_role==role %}selected{% endif %}>{{ role }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td title="是否用于问数分析维度选择">
+          <input type="checkbox" name="is_analysis_dim" value="1" form="ff_{{ f.id }}"
+            {% if f.is_analysis_dim is not defined or f.is_analysis_dim %}checked{% endif %}>
+        </td>
+        <td><input type="checkbox" name="enabled" value="1" form="ff_{{ f.id }}" {% if f.enabled %}checked{% endif %}></td>
+        <td><input type="text" name="sort_no" value="{{ f.sort_no }}" style="max-width:70px" form="ff_{{ f.id }}"></td>
+        <td><button type="submit" class="secondary" form="ff_{{ f.id }}">存</button></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8">暂无字段，请保存或同步</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

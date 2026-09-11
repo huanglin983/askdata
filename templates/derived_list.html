@@ -1,24 +1,31 @@
 {% extends "base.html" %}
-{% block title %}派生指标{% endblock %}
+{% block title %}派生指标 · 指标管理{% endblock %}
 {% block content %}
+{% set active = 'derived' %}
+{% include "_metric_tabs.html" %}
 <div class="card">
   <div class="actions" style="justify-content:space-between">
-    <h1 style="margin:0">派生指标</h1>
+    <div>
+      <h1 style="margin:0">派生指标</h1>
+      <p class="muted" style="margin:0.35rem 0 0">原子加业务切片（时间 + 修饰词维度），默认继承原子指标元数据。</p>
+    </div>
     <a class="btn" href="{{ url_for('derived_edit') }}">新增</a>
   </div>
-  <p class="muted">固化阶段口径；金额字段强制绑定同前缀汇率；分析维度可勾选绑定。</p>
-  <table>
+  <table class="compact">
     <thead>
-      <tr><th>名称</th><th>阶段</th><th>金额列</th><th>汇率列</th><th>绑定维度</th><th>对外</th><th></th></tr>
+      <tr><th>名称</th><th>阶段</th><th>业务线</th><th>主题域</th><th>金额列</th><th>汇率列</th><th>附加过滤</th><th>绑定维度</th><th>对外</th><th></th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td>{{ r.name }} <span class="badge">{{ r.id }}</span></td>
+        <td title="{{ r.name }} ({{ r.id }})">{{ r.name }} <span class="badge">{{ r.id }}</span></td>
         <td>{{ r.stage_type }}</td>
-        <td><code>{{ r.amount_col }}</code></td>
-        <td><code>{{ r.rate_col }}</code></td>
-        <td class="muted">{{ r.dim_labels }}</td>
+        <td class="muted" title="{{ r.biz_line or '-' }}">{{ r.biz_line or '-' }}</td>
+        <td class="muted" title="{{ r.theme_domain or '-' }}">{{ r.theme_domain or '-' }}</td>
+        <td title="{{ r.amount_col }}"><code>{{ r.amount_col }}</code></td>
+        <td title="{{ r.rate_col }}"><code>{{ r.rate_col }}</code></td>
+        <td class="muted">{% if r.filter_json and r.filter_json|trim and r.filter_json|trim != '[]' %}有{% else %}-{% endif %}</td>
+        <td class="muted" title="{{ r.dim_labels }}">{{ r.dim_labels }}</td>
         <td>{{ '是' if r.exposed else '否' }}</td>
         <td class="actions">
           <a href="{{ url_for('derived_edit', metric_id=r.id) }}">编辑</a>
@@ -28,7 +35,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7">暂无数据</td></tr>
+      <tr><td colspan="10">暂无数据</td></tr>
       {% endfor %}
     </tbody>
   </table>

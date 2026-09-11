@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import db
+import meta
 
 CURRENCY_CN = {
     "CNY": "人民币(CNY)",
@@ -30,7 +31,7 @@ def _metric_name(mid: str) -> str:
 
 
 def _dim_name(code: str) -> str:
-    d = db.get_analysis_dim_by_code(code)
+    d = meta.get_analysis_field_by_code(code)
     return d["name"] if d else code
 
 
@@ -61,8 +62,26 @@ def _audit_one_zh(item: dict[str, Any]) -> dict[str, Any]:
         out.update(
             {
                 "业务阶段": item.get("stage_type"),
+                "来源原子": item.get("atomic_name") or item.get("atomic_id"),
                 "金额字段": item.get("amount_col"),
                 "汇率字段": item.get("rate_col"),
+                "原子过滤": item.get("atomic_filters") or "(无)",
+                "派生附加过滤": item.get("derived_filters") or "(无)",
+                "SQL手工改写": "是" if item.get("sql_manual") else "否",
+                "目标币种": CURRENCY_CN.get(item.get("currency", ""), item.get("currency")),
+                "换算表达式": item.get("expr"),
+                "粒度维度": [_dim_name(c) for c in item.get("grain") or []],
+                "可分析维度": [_dim_name(c) for c in item.get("analysis_dims") or []],
+            }
+        )
+    elif t == "atomic":
+        out.update(
+            {
+                "业务阶段": item.get("stage_type"),
+                "金额字段": item.get("amount_col"),
+                "汇率字段": item.get("rate_col"),
+                "原子过滤": item.get("atomic_filters") or "(无)",
+                "SQL手工改写": "是" if item.get("sql_manual") else "否",
                 "目标币种": CURRENCY_CN.get(item.get("currency", ""), item.get("currency")),
                 "换算表达式": item.get("expr"),
                 "粒度维度": [_dim_name(c) for c in item.get("grain") or []],
@@ -98,7 +117,7 @@ def audit_zh(audit: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
 def column_zh(col: str) -> str:
     if col == "project_number":
         return "项目编号"
-    d = db.get_analysis_dim_by_code(col)
+    d = meta.get_analysis_field_by_code(col)
     if d:
         return d["name"]
     # metric alias like cmp_cost_gap

@@ -34,9 +34,13 @@
     <label>附加分析维度（须已绑定到所选指标）</label>
     <div class="checks">
       {% for d in analysis_dims %}
-      <label><input type="checkbox" name="dims" value="{{ d.code }}" {% if d.code in form.dims %}checked{% endif %}> {{ d.name }}</label>
+      <label>
+        <input type="checkbox" name="dims" value="{{ d.code }}" {% if d.code in form.dims %}checked{% endif %}>
+        {{ d.name }}
+        <span class="muted">{{ 'fact' if d.origin=='fact' else 'dim' }}{% if d.table_name %} · {{ d.table_name }}{% endif %}</span>
+      </label>
       {% else %}
-      <span class="muted">无可用分析维度，请先在「分析维度」维护并绑定到指标</span>
+      <span class="muted">无可用分析维度，请在元数据字段中勾选「用于分析维度」</span>
       {% endfor %}
     </div>
 

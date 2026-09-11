@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}表元数据{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between">
+    <h1 style="margin:0">表元数据</h1>
+    <div class="actions">
+      <a class="btn secondary" href="{{ url_for('biz_arch_view') }}">业务架构</a>
+      <a class="btn secondary" href="{{ url_for('meta_rel_list') }}">维度关系</a>
+      <a class="btn" href="{{ url_for('meta_table_edit') }}">注册表</a>
+    </div>
+  </div>
+  <p class="muted">多维模型：注册事实表 / 维度表及字段；配置表的数据粒度（业务主键）与维度关系。</p>
+  <table class="compact">
+    <thead>
+      <tr><th>名称</th><th>物理表</th><th>类型</th><th>数据粒度</th><th>字段数</th><th>启用</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td title="{{ r.name }} ({{ r.id }})">{{ r.name }} <span class="badge">{{ r.id }}</span></td>
+        <td title="{{ r.physical_name }}"><code>{{ r.physical_name }}</code></td>
+        <td>{{ '事实表' if r.table_kind=='fact' else '维度表' }}</td>
+        <td class="muted" title="{% if r.grain_keys %}{{ r.grain_keys | join(', ') }}{% else %}-{% endif %}">{% if r.grain_keys %}<code>{{ r.grain_keys | join(', ') }}</code>{% else %}-{% endif %}</td>
+        <td>{{ r.field_n }}</td>
+        <td>{{ '是' if r.enabled else '否' }}</td>
+        <td class="actions">
+          <a href="{{ url_for('meta_table_edit', table_id=r.id) }}">编辑</a>
+          <form method="post" action="{{ url_for('meta_table_delete', table_id=r.id) }}" onsubmit="return confirm('删除表元数据？');">
+            <button type="submit" class="danger">删</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">暂无数据，请先注册表</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

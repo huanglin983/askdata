@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}业务架构{% endblock %}
+{% block content %}
+<div class="biz-arch-layout">
+  <aside class="biz-arch-tree card">
+    <div class="actions" style="justify-content:space-between;margin-bottom:0.5rem">
+      <h2 style="margin:0;font-size:1rem">目录</h2>
+      <div class="actions">
+        <button type="button" class="secondary" id="tree-expand">展开</button>
+        <button type="button" class="secondary" id="tree-collapse">收起</button>
+      </div>
+    </div>
+    <input type="search" id="tree-filter" placeholder="请输入" style="max-width:100%;margin-bottom:0.6rem">
+    <ul class="arch-tree" id="arch-tree">
+      <li class="arch-tree-root {% if not parent_id %}is-active{% endif %}">
+        <a href="{{ url_for('biz_arch_view') }}" class="arch-node">
+          <span class="arch-label">全部业务线</span>
+        </a>
+      </li>
+      {% macro render_tree(nodes, depth=0) -%}
+        {% for n in nodes %}
+        <li class="arch-tree-item {% if parent_id==n.id %}is-active{% endif %}" data-name="{{ n.name_zh }} {{ n.name_en }}">
+          <div class="arch-node-row" style="padding-left:{{ depth * 0.85 }}rem">
+            {% if n.children %}
+            <button type="button" class="arch-toggle" aria-label="展开/收起">▾</button>
+            {% else %}
+            <span class="arch-toggle-spacer"></span>
+            {% endif %}
+            <a href="{{ url_for('biz_arch_view', parent_id=n.id) }}" class="arch-node">
+              <span class="arch-label">{{ n.name_zh }}</span>
+              <span class="arch-count">{{ n.child_count }}</span>
+            </a>
+          </div>
+          {% if n.children %}
+          <ul class="arch-children">{{ render_tree(n.children, depth + 1) }}</ul>
+          {% endif %}
+        </li>
+        {% endfor %}
+      {%- endmacro %}
+      {{ render_tree(tree) }}
+    </ul>
+  </aside>
+
+  <section class="biz-arch-main card">
+    <div class="actions" style="justify-content:space-between;margin-bottom:0.75rem">
+      <div>
+        <h1 style="margin:0;font-size:1.15rem">业务架构</h1>
+        <p class="muted" style="margin:0.25rem 0 0">
+          {% if parent %}
+            当前：{{ type_labels.get(parent.node_type, parent.node_type) }} · {{ parent.name_zh }}
+            {% if parent.line_name is defined %}{% endif %}
+          {% else %}
+            业务线列表（顶级）
+          {% endif %}
+          · 层级：业务线 → 主题域 → 业务对象 → 业务过程
+        </p>
+      </div>
+      <a class="btn" href="{{ url_for('biz_arch_edit', parent_id=parent_id, node_type=child_type) }}">新增{{ child_type_label }}</a>
+    </div>
+
+    <form method="get" class="arch-filter" action="{{ url_for('biz_arch_view') }}">
+      {% if parent_id %}<input type="hidden" name="parent_id" value="{{ parent_id }}">{% endif %}
+      <div class="arch-filter-row">
+        <label>关键词
+          <input type="text" name="q" value="{{ keyword }}" placeholder="中文名 / 英文名" style="max-width:220px">
+        </label>
+        <label>状态
+          <select name="enabled" style="max-width:120px">
+            <option value="" {% if enabled=='' %}selected{% endif %}>全部</option>
+            <option value="1" {% if enabled=='1' %}selected{% endif %}>启用</option>
+            <option value="0" {% if enabled=='0' %}selected{% endif %}>停用</option>
+          </select>
+        </label>
+        <div class="actions" style="align-self:flex-end">
+          <a class="btn secondary" href="{{ url_for('biz_arch_view', parent_id=parent_id) }}">重置</a>
+          <button type="submit">搜索</button>
+        </div>
+      </div>
+    </form>
+
+    <form method="post" action="{{ url_for('biz_arch_batch') }}" id="batch-form">
+      {% if parent_id %}<input type="hidden" name="parent_id" value="{{ parent_id }}">{% endif %}
+      <div class="actions" style="margin:0.6rem 0">
+        <button type="submit" name="action" value="enable" class="secondary">批量启用</button>
+        <button type="submit" name="action" value="disable" class="secondary">批量停用</button>
+        <button type="submit" name="action" value="delete" class="danger"
+          onclick="return confirm('确定批量删除？子节点将一并删除。');">批量删除</button>
+      </div>
+
+      <table class="compact">
+        <thead>
+          <tr>
+            <th style="width:2rem"><input type="checkbox" id="check-all"></th>
+            <th>业务线</th>
+            <th>中文名称</th>
+            <th>英文名称</th>
+            <th>类型</th>
+            <th>状态</th>
+            <th>关联</th>
+            <th style="width:11rem"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{ r.id }}" class="row-check"></td>
+            <td class="muted">{{ r.line_name or (r.name_zh if r.node_type=='line' else '-') }}</td>
+            <td>
+              {% if r.node_type != 'process' %}
+              <a href="{{ url_for('biz_arch_view', parent_id=r.id) }}">{{ r.name_zh }}</a>
+              {% else %}
+              {{ r.name_zh }}
+              {% endif %}
+            </td>
+            <td><code>{{ r.name_en or '-' }}</code></td>
+            <td><span class="badge">{{ r.type_label }}</span></td>
+            <td>{% if r.enabled %}<span class="tag-ok">启用</span>{% else %}<span class="tag-off">停用</span>{% endif %}</td>
+            <td class="muted">{{ r.child_count }}</td>
+            <td class="actions">
+              <a href="{{ url_for('biz_arch_view', parent_id=r.id) if r.node_type != 'process' else url_for('biz_arch_edit', node_id=r.id) }}">查看</a>
+              <a href="{{ url_for('biz_arch_edit', node_id=r.id) }}">编辑</a>
+              <button type="submit" class="secondary" form="toggle_{{ r.id }}">{{ '停用' if r.enabled else '启用' }}</button>
+              <button type="submit" class="danger" form="del_{{ r.id }}" onclick="return confirm('删除「{{ r.name_zh }}」及其子节点？');">删除</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8">暂无数据，点击「新增{{ child_type_label }}」</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </form>
+
+    {% for r in rows %}
+    <form id="toggle_{{ r.id }}" method="post" action="{{ url_for('biz_arch_toggle', node_id=r.id) }}" hidden>
+      {% if parent_id %}<input type="hidden" name="parent_id" value="{{ parent_id }}">{% endif %}
+    </form>
+    <form id="del_{{ r.id }}" method="post" action="{{ url_for('biz_arch_delete', node_id=r.id) }}" hidden>
+      {% if parent_id %}<input type="hidden" name="parent_id" value="{{ parent_id }}">{% endif %}
+    </form>
+    {% endfor %}
+  </section>
+</div>
+
+<script>
+(function () {
+  const tree = document.getElementById('arch-tree');
+  document.getElementById('tree-expand').addEventListener('click', () => {
+    tree.querySelectorAll('.arch-tree-item').forEach(li => li.classList.remove('is-collapsed'));
+  });
+  document.getElementById('tree-collapse').addEventListener('click', () => {
+    tree.querySelectorAll('.arch-tree-item').forEach(li => {
+      if (li.querySelector(':scope > .arch-children')) li.classList.add('is-collapsed');
+    });
+  });
+  tree.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.arch-toggle');
+    if (!btn) return;
+    const li = btn.closest('.arch-tree-item');
+    if (li) li.classList.toggle('is-collapsed');
+  });
+  document.getElementById('tree-filter').addEventListener('input', (ev) => {
+    const q = (ev.target.value || '').trim().toLowerCase();
+    tree.querySelectorAll('.arch-tree-item').forEach(li => {
+      const name = (li.dataset.name || '').toLowerCase();
+      const hit = !q || name.includes(q);
+      li.style.display = hit ? '' : 'none';
+      if (hit && q) li.classList.remove('is-collapsed');
+    });
+  });
+  const checkAll = document.getElementById('check-all');
+  if (checkAll) {
+    checkAll.addEventListener('change', () => {
+      document.querySelectorAll('.row-check').forEach(c => { c.checked = checkAll.checked; });
+    });
+  }
+})();
+</script>
+{% endblock %}

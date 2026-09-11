@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}编辑维度关系{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ '编辑' if row and row.id else '新增' }}维度关系</h1>
+  <form method="post" id="rel-form">
+    {% if row and row.id %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
+    <label>事实表</label>
+    <select name="fact_table_id" id="fact_table_id" required>
+      {% for t in facts %}
+      <option value="{{ t.id }}" {% if row and row.fact_table_id==t.id %}selected{% endif %}>
+        {{ t.name }} ({{ t.physical_name }})
+      </option>
+      {% endfor %}
+    </select>
+    <label>维度表</label>
+    <select name="dim_table_id" id="dim_table_id" required>
+      {% for t in dims %}
+      <option value="{{ t.id }}" {% if row and row.dim_table_id==t.id %}selected{% endif %}>
+        {{ t.name }} ({{ t.physical_name }})
+      </option>
+      {% endfor %}
+    </select>
+    <p class="muted">选择维度表后可自动识别与事实表<strong>同名</strong>的字段作为关联键。</p>
+
+    <label>关联键</label>
+    <div id="join-keys">
+      {% set keys = row.join_keys_list if row and row.join_keys_list else [] %}
+      {% for k in keys %}
+      <div class="actions filter-row" style="margin-bottom:0.35rem">
+        <input type="text" name="join_left" placeholder="事实表字段" value="{{ k.left }}" style="max-width:200px">
+        <span>=</span>
+        <input type="text" name="join_right" placeholder="维度表字段" value="{{ k.right }}" style="max-width:200px">
+        <button type="button" class="secondary" onclick="this.parentElement.remove()">删</button>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="actions">
+      <button type="button" class="secondary" id="add-key">＋关联键</button>
+      <button type="button" id="match-keys">自动识别同名字段</button>
+    </p>
+
+    <label>JOIN 类型</label>
+    <select name="join_type">
+      {% set jt = row.join_type if row else 'LEFT' %}
+      <option value="LEFT" {% if jt=='LEFT' %}selected{% endif %}>LEFT</option>
+      <option value="INNER" {% if jt=='INNER' %}selected{% endif %}>INNER</option>
+    </select>
+    <label>备注</label>
+    <input type="text" name="remark" value="{{ row.remark if row else '' }}">
+    <label><input type="checkbox" name="enabled" value="1" {% if not row or row.enabled %}checked{% endif %}> 启用</label>
+    <p class="actions" style="margin-top:1rem">
+      <button type="submit">保存</button>
+      <a class="btn secondary" href="{{ url_for('meta_rel_list') }}">返回</a>
+    </p>
+  </form>
+</div>
+<template id="key-row-tpl">
+  <div class="actions filter-row" style="margin-bottom:0.35rem">
+    <input type="text" name="join_left" placeholder="事实表字段" style="max-width:200px">
+    <span>=</span>
+    <input type="text" name="join_right" placeholder="维度表字段" style="max-width:200px">
+    <button type="button" class="secondary" onclick="this.parentElement.remove()">删</button>
+  </div>
+</template>
+<script>
+(function () {
+  const box = document.getElementById('join-keys');
+  const tpl = document.getElementById('key-row-tpl');
+  document.getElementById('add-key').addEventListener('click', () => {
+    box.appendChild(tpl.content.cloneNode(true));
+  });
+
+  function renderKeys(keys) {
+    box.innerHTML = '';
+    (keys || []).forEach(k => {
+      const node = tpl.content.cloneNode(true);
+      const inputs = node.querySelectorAll('input');
+      inputs[0].value = k.left || '';
+      inputs[1].value = k.right || '';
+      box.appendChild(node);
+    });
+    if (!(keys || []).length) box.appendChild(tpl.content.cloneNode(true));
+  }
+
+  async function matchKeys() {
+    const factId = document.getElementById('fact_table_id').value;
+    const dimId = document.getElementById('dim_table_id').value;
+    const resp = await fetch('{{ url_for("meta_rel_match_keys") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fact_table_id: factId, dim_table_id: dimId })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert(data.error || '识别失败');
+      return;
+    }
+    if (!data.keys.length) {
+      alert('未找到同名字段，请手工填写关联键');
+      return;
+    }
+    renderKeys(data.keys);
+  }
+
+  document.getElementById('match-keys').addEventListener('click', matchKeys);
+  document.getElementById('dim_table_id').addEventListener('change', matchKeys);
+
+  if (!box.children.length) {
+    matchKeys().catch(() => box.appendChild(tpl.content.cloneNode(true)));
+  }
+})();
+</script>
+{% endblock %}

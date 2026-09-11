@@ -14,8 +14,13 @@ Python + Flask + SQLite。语义层元数据驱动，AI/意图层只出结构化
 
 ## 能力
 
-- 原子 / 派生 / 复合指标 Web CRUD
-- 分析维度主数据 + 指标绑定
+- **指标管理**统一入口（`/metrics`）：原子 / 派生 / 复合三类卡片 + 列表 Tab；紧凑表省略展示
+- 业务架构主数据（业务线 → 主题域 → 业务对象 → 业务过程）
+- 表/字段元数据 + 事实↔维度关系；分析维度来自字段勾选（`is_analysis_dim`）+ 指标绑定
+- 原子：绑定物理字段、尽量少写过滤；自动/手工 SQL；阶段汇率字段在原子层维护
+- 派生：原子 + 业务切片；金额/汇率/分类继承自原子
+- 复合：同粒度四则运算（如 `(A+B)/C`）；粒度/币种校验
+- 指标地图：复合向下展开依赖树
 - 规则引擎：阶段汇率绑定、币种注入、粒度/维度校验、JOIN、复合先换算再运算
 - 问数：表单或关键词意图 → SQL → 样例执行 → 中文审计展示
 
@@ -47,6 +52,7 @@ python -m venv .venv
 
 ```text
 app.py / db.py / engine.py / intent.py / display.py
+meta.py / biz_arch.py / metric_sql.py / metric_map.py
 templates/  static/  data/  doc/  requirements.txt
 ```
 

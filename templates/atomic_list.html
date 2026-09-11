@@ -1,25 +1,33 @@
 {% extends "base.html" %}
-{% block title %}原子指标{% endblock %}
+{% block title %}原子指标 · 指标管理{% endblock %}
 {% block content %}
+{% set active = 'atomic' %}
+{% include "_metric_tabs.html" %}
 <div class="card">
   <div class="actions" style="justify-content:space-between">
-    <h1 style="margin:0">原子指标</h1>
+    <div>
+      <h1 style="margin:0">原子指标</h1>
+      <p class="muted" style="margin:0.35rem 0 0">绑定物理字段，尽量不写 where，维护基础业务属性。</p>
+    </div>
     <a class="btn" href="{{ url_for('atomic_edit') }}">新增</a>
   </div>
-  <p class="muted">只映射原始字段，不含 WHERE / 计算 / 汇率；粒度与分析维度通过绑定管理。</p>
-  <table>
+  <table class="compact">
     <thead>
-      <tr><th>ID</th><th>名称</th><th>来源表</th><th>字段</th><th>聚合</th><th>绑定维度</th><th></th></tr>
+      <tr><th>ID</th><th>名称</th><th>英文名</th><th>字段</th><th>阶段/汇率</th><th>业务线</th><th>主题域</th><th>过滤</th><th>SQL</th><th>绑定维度</th><th></th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td><code>{{ r.id }}</code></td>
-        <td>{{ r.name }}</td>
-        <td>{{ r.source_table }}</td>
-        <td>{{ r.source_field }}</td>
-        <td>{{ r.agg_type }}</td>
-        <td class="muted">{{ r.dim_labels }}</td>
+        <td title="{{ r.id }}"><code>{{ r.id }}</code></td>
+        <td title="{{ r.name }}">{{ r.name }}</td>
+        <td title="{{ r.name_en or r.source_field }}"><code>{{ r.name_en or r.source_field }}</code></td>
+        <td title="{{ r.source_field }} {{ r.agg_type }}">{{ r.source_field }} <span class="badge">{{ r.agg_type }}</span></td>
+        <td class="muted" title="{% if r.stage_type %}{{ r.stage_type }} / {{ r.rate_col or '-' }}{% else %}-{% endif %}">{% if r.stage_type %}{{ r.stage_type }} / <code>{{ r.rate_col or '-' }}</code>{% else %}-{% endif %}</td>
+        <td class="muted" title="{{ r.biz_line or '-' }}">{{ r.biz_line or '-' }}</td>
+        <td class="muted" title="{{ r.theme_domain or '-' }}">{{ r.theme_domain or '-' }}</td>
+        <td class="muted">{% if r.filter_json and r.filter_json|trim and r.filter_json|trim != '[]' %}有{% else %}-{% endif %}</td>
+        <td class="muted">{% if r.sql_manual %}手工{% else %}自动{% endif %}</td>
+        <td class="muted" title="{{ r.dim_labels }}">{{ r.dim_labels }}</td>
         <td class="actions">
           <a href="{{ url_for('atomic_edit', metric_id=r.id) }}">编辑</a>
           <form method="post" action="{{ url_for('atomic_delete', metric_id=r.id) }}" onsubmit="return confirm('删除？');">
@@ -28,7 +36,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7">暂无数据</td></tr>
+      <tr><td colspan="11">暂无数据</td></tr>
       {% endfor %}
     </tbody>
   </table>

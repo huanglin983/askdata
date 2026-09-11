@@ -5,6 +5,10 @@ import json
 import sqlite3
 from pathlib import Path
 
+import metric_sql
+import meta
+import biz_arch
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "demo.db"
 
@@ -32,12 +36,155 @@ def init_db(force: bool = False) -> None:
 
     with get_conn() as conn:
         _create_schema(conn)
+        meta.ensure_schema(conn)
+        biz_arch.ensure_schema(conn)
+        _migrate_schema(conn)
         n = conn.execute("SELECT COUNT(*) AS c FROM metric_atomic").fetchone()["c"]
         if n == 0:
             _seed(conn)
+            meta.seed_demo_meta(conn)
+            biz_arch.seed_demo(conn)
+            _seed_default_metric_dim_binds(conn)
         else:
-            _ensure_dim_catalog_and_binds(conn)
+            _backfill_atomic_fx_from_derived(conn)
+            meta.seed_demo_meta(conn)
+            biz_arch.seed_demo(conn)
+            _ensure_metric_dim_bind_schema(conn)
+            _migrate_binds_to_meta_fields(conn)
+            _seed_default_metric_dim_binds(conn)
         conn.commit()
+
+
+def _table_cols(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_col(conn: sqlite3.Connection, table: str, col: str, decl: str) -> None:
+    cols = _table_cols(conn, table)
+    if col not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
+TAXONOMY_KEYS = ("biz_line", "theme_domain", "biz_object", "biz_process")
+
+
+def empty_taxonomy() -> dict[str, str]:
+    return {k: "" for k in TAXONOMY_KEYS}
+
+
+def _row_taxonomy(row: sqlite3.Row | None) -> dict[str, str]:
+    if not row:
+        return empty_taxonomy()
+    keys = set(row.keys())
+    return {k: (row[k] or "") if k in keys else "" for k in TAXONOMY_KEYS}
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Add filter / SQL / FX / taxonomy columns to existing DBs."""
+    _add_col(conn, "metric_atomic", "filter_json", "TEXT NOT NULL DEFAULT '[]'")
+    _add_col(conn, "metric_atomic", "sql_expr", "TEXT")
+    _add_col(conn, "metric_atomic", "sql_manual", "INTEGER NOT NULL DEFAULT 0")
+    _add_col(conn, "metric_atomic", "stage_type", "TEXT")
+    _add_col(conn, "metric_atomic", "rate_col", "TEXT")
+    _add_col(conn, "metric_atomic", "name_en", "TEXT")
+    for col in TAXONOMY_KEYS:
+        _add_col(conn, "metric_atomic", col, "TEXT")
+    _add_col(conn, "metric_derived", "filter_json", "TEXT NOT NULL DEFAULT '[]'")
+    for col in TAXONOMY_KEYS:
+        _add_col(conn, "metric_derived", col, "TEXT")
+    for col in TAXONOMY_KEYS:
+        _add_col(conn, "metric_composite", col, "TEXT")
+    _migrate_metric_dim_bind_drop_fk(conn)
+    # backfill derived taxonomy from atomic when empty
+    conn.execute(
+        """UPDATE metric_derived
+           SET biz_line = (SELECT a.biz_line FROM metric_atomic a WHERE a.id = metric_derived.atomic_id),
+               theme_domain = (SELECT a.theme_domain FROM metric_atomic a WHERE a.id = metric_derived.atomic_id),
+               biz_object = (SELECT a.biz_object FROM metric_atomic a WHERE a.id = metric_derived.atomic_id),
+               biz_process = (SELECT a.biz_process FROM metric_atomic a WHERE a.id = metric_derived.atomic_id)
+           WHERE COALESCE(TRIM(biz_line), '') = ''
+             AND EXISTS (SELECT 1 FROM metric_atomic a WHERE a.id = metric_derived.atomic_id)"""
+    )
+    # backfill English names from source_field when empty
+    conn.execute(
+        """UPDATE metric_atomic
+           SET name_en = source_field
+           WHERE name_en IS NULL OR TRIM(name_en) = ''"""
+    )
+    # refresh auto SQL to new default format when not manually overridden
+    for atom in conn.execute(
+        """SELECT id, source_table, source_field, name_en, filter_json, sql_manual
+           FROM metric_atomic
+           WHERE COALESCE(sql_manual, 0) = 0"""
+    ):
+        try:
+            preview = metric_sql.build_atomic_sql_preview(
+                source_table=atom["source_table"],
+                source_field=atom["source_field"],
+                name_en=atom["name_en"] or atom["source_field"],
+                filter_text=metric_sql.normalize_filter_text(atom["filter_json"] or ""),
+            )
+            conn.execute(
+                "UPDATE metric_atomic SET sql_expr=? WHERE id=?",
+                (preview, atom["id"]),
+            )
+        except ValueError:
+            continue
+
+
+def _migrate_metric_dim_bind_drop_fk(conn: sqlite3.Connection) -> None:
+    """Drop FK to analysis_dim so dim_id can reference meta_field.id."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='metric_dim_bind'"
+    ).fetchone()
+    if not row or "analysis_dim" not in (row["sql"] or ""):
+        return
+    conn.executescript(
+        """
+        CREATE TABLE metric_dim_bind_new (
+            metric_type TEXT NOT NULL,
+            metric_id TEXT NOT NULL,
+            dim_id TEXT NOT NULL,
+            PRIMARY KEY (metric_type, metric_id, dim_id)
+        );
+        INSERT OR IGNORE INTO metric_dim_bind_new
+            SELECT metric_type, metric_id, dim_id FROM metric_dim_bind;
+        DROP TABLE metric_dim_bind;
+        ALTER TABLE metric_dim_bind_new RENAME TO metric_dim_bind;
+        """
+    )
+
+def _backfill_atomic_fx_from_derived(conn: sqlite3.Connection) -> None:
+    """Move stage FX pair from derived onto linked amount atomics when empty."""
+    for row in conn.execute(
+        """SELECT d.atomic_id, d.stage_type, d.amount_col, d.rate_col
+           FROM metric_derived d"""
+    ):
+        atom = conn.execute(
+            "SELECT id, stage_type, rate_col, source_field, name_en, filter_json, sql_expr, sql_manual, source_table, agg_type FROM metric_atomic WHERE id=?",
+            (row["atomic_id"],),
+        ).fetchone()
+        if not atom:
+            continue
+        stage = atom["stage_type"] or row["stage_type"]
+        rate = atom["rate_col"] or row["rate_col"]
+        conn.execute(
+            "UPDATE metric_atomic SET stage_type=?, rate_col=? WHERE id=?",
+            (stage, rate, atom["id"]),
+        )
+        if not atom["sql_expr"]:
+            filter_text = metric_sql.normalize_filter_text(atom["filter_json"] or "")
+            name_en = atom["name_en"] or atom["source_field"]
+            preview = metric_sql.build_atomic_sql_preview(
+                source_table=atom["source_table"],
+                source_field=atom["source_field"],
+                name_en=name_en,
+                filter_text=filter_text,
+            )
+            conn.execute(
+                "UPDATE metric_atomic SET sql_expr=?, name_en=COALESCE(NULLIF(name_en,''), ?) WHERE id=?",
+                (preview, name_en, atom["id"]),
+            )
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:
@@ -46,11 +193,21 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS metric_atomic (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
+            name_en TEXT,
             source_table TEXT NOT NULL,
             source_field TEXT NOT NULL,
             agg_type TEXT NOT NULL DEFAULT 'SUM',
             grain_dims TEXT NOT NULL DEFAULT '["project_number"]',
-            remark TEXT
+            remark TEXT,
+            filter_json TEXT NOT NULL DEFAULT '',
+            sql_expr TEXT,
+            sql_manual INTEGER NOT NULL DEFAULT 0,
+            stage_type TEXT,
+            rate_col TEXT,
+            biz_line TEXT,
+            theme_domain TEXT,
+            biz_object TEXT,
+            biz_process TEXT
         );
 
         CREATE TABLE IF NOT EXISTS metric_derived (
@@ -62,6 +219,11 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             rate_col TEXT NOT NULL,
             grain_dims TEXT NOT NULL DEFAULT '["project_number"]',
             exposed INTEGER NOT NULL DEFAULT 1,
+            filter_json TEXT NOT NULL DEFAULT '',
+            biz_line TEXT,
+            theme_domain TEXT,
+            biz_object TEXT,
+            biz_process TEXT,
             FOREIGN KEY (atomic_id) REFERENCES metric_atomic(id)
         );
 
@@ -71,7 +233,11 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             formula TEXT NOT NULL,
             sub_metric_ids TEXT NOT NULL,
             check_currency_same INTEGER NOT NULL DEFAULT 1,
-            check_granularity_same INTEGER NOT NULL DEFAULT 1
+            check_granularity_same INTEGER NOT NULL DEFAULT 1,
+            biz_line TEXT,
+            theme_domain TEXT,
+            biz_object TEXT,
+            biz_process TEXT
         );
 
         CREATE TABLE IF NOT EXISTS currency_rule (
@@ -96,8 +262,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             metric_type TEXT NOT NULL,
             metric_id TEXT NOT NULL,
             dim_id TEXT NOT NULL,
-            PRIMARY KEY (metric_type, metric_id, dim_id),
-            FOREIGN KEY (dim_id) REFERENCES analysis_dim(id)
+            PRIMARY KEY (metric_type, metric_id, dim_id)
         );
 
         CREATE TABLE IF NOT EXISTS ads_fin_tracker_comparison_summary_df (
@@ -135,65 +300,114 @@ def _seed(conn: sqlite3.Connection) -> None:
         ],
     )
 
-    _seed_analysis_dims(conn)
-
-    # Atomic metrics: amounts + rates + dims
+    # Atomic metrics: amounts (+ stage FX) + rates + dims
+    # taxonomy: 业务线=支架 / 主题域=财务 / 业务对象=项目 / 业务过程=阶段
+    dim_tax = ("支架", "财务", "项目", "")
     atomics = []
     for stage, amount, rate in STAGES:
+        fin_tax = ("支架", "财务", "项目", stage)
+        amount_sql = metric_sql.build_atomic_sql_preview(
+            source_table="ads_fin_tracker_comparison_summary_df",
+            source_field=amount,
+            name_en=amount,
+            filter_text="",
+        )
         atomics.append(
             (
                 f"atom_{amount}",
                 f"{stage}原始成本",
+                amount,
                 "ads_fin_tracker_comparison_summary_df",
                 amount,
                 "SUM",
                 '["project_number"]',
-                f"{stage} 阶段金额原子",
+                f"{stage} 阶段金额原子（汇率字段在本层维护）",
+                "",
+                amount_sql,
+                0,
+                stage,
+                rate,
+                *fin_tax,
             )
+        )
+        rate_sql = metric_sql.build_atomic_sql_preview(
+            source_table="ads_fin_tracker_comparison_summary_df",
+            source_field=rate,
+            name_en=rate,
+            filter_text="",
         )
         atomics.append(
             (
                 f"atom_{rate}",
                 f"{stage}汇率",
+                rate,
                 "ads_fin_tracker_comparison_summary_df",
                 rate,
                 "MAX",
                 '["project_number"]',
                 f"{stage} 阶段汇率原子",
+                "",
+                rate_sql,
+                0,
+                stage,
+                "",
+                *fin_tax,
             )
         )
-    atomics.extend(
-        [
+    for aid, name, name_en, table, field, agg, remark in [
+        (
+            "atom_project_number",
+            "项目编号",
+            "project_number",
+            "dim_project",
+            "project_number",
+            "MAX",
+            "维度原子",
+        ),
+        (
+            "atom_power_plant",
+            "电站",
+            "power_plant",
+            "dim_project",
+            "power_plant",
+            "MAX",
+            "维度原子",
+        ),
+    ]:
+        preview = metric_sql.build_atomic_sql_preview(
+            source_table=table, source_field=field, name_en=name_en, filter_text=""
+        )
+        atomics.append(
             (
-                "atom_project_number",
-                "项目编号",
-                "dim_project",
-                "project_number",
-                "MAX",
+                aid,
+                name,
+                name_en,
+                table,
+                field,
+                agg,
                 '["project_number"]',
-                "维度原子",
-            ),
-            (
-                "atom_power_plant",
-                "电站",
-                "dim_project",
-                "power_plant",
-                "MAX",
-                '["project_number"]',
-                "维度原子",
-            ),
-        ]
-    )
+                remark,
+                "",
+                preview,
+                0,
+                "",
+                "",
+                *dim_tax,
+            )
+        )
     conn.executemany(
         """INSERT INTO metric_atomic
-           (id, name, source_table, source_field, agg_type, grain_dims, remark)
-           VALUES (?,?,?,?,?,?,?)""",
+           (id, name, name_en, source_table, source_field, agg_type, grain_dims, remark,
+            filter_json, sql_expr, sql_manual, stage_type, rate_col,
+            biz_line, theme_domain, biz_object, biz_process)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         atomics,
     )
 
-    # Derived: five-stage total cost (exposed)
+    # Derived: five-stage total cost (FX + taxonomy inherited from atomic)
     derived = []
     for stage, amount, rate in STAGES:
+        fin_tax = ("支架", "财务", "项目", stage)
         derived.append(
             (
                 f"drv_{stage.lower()}_total_cost",
@@ -204,20 +418,25 @@ def _seed(conn: sqlite3.Connection) -> None:
                 rate,
                 '["project_number"]',
                 1,
+                "",
+                *fin_tax,
             )
         )
     conn.executemany(
         """INSERT INTO metric_derived
-           (id, name, atomic_id, stage_type, amount_col, rate_col, grain_dims, exposed)
-           VALUES (?,?,?,?,?,?,?,?)""",
+           (id, name, atomic_id, stage_type, amount_col, rate_col, grain_dims, exposed, filter_json,
+            biz_line, theme_domain, biz_object, biz_process)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         derived,
     )
 
-    # Composite: GAP and GAP rate
+    # Composite: GAP and GAP rate (default from first formula metric · Contract)
+    gap_tax = ("支架", "财务", "项目", "Contract")
     conn.execute(
         """INSERT INTO metric_composite
-           (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same)
-           VALUES (?,?,?,?,?,?)""",
+           (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same,
+            biz_line, theme_domain, biz_object, biz_process)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             "cmp_cost_gap",
             "成本GAP",
@@ -225,12 +444,14 @@ def _seed(conn: sqlite3.Connection) -> None:
             json.dumps(["drv_contract_total_cost", "drv_pj_total_cost"]),
             1,
             1,
+            *gap_tax,
         ),
     )
     conn.execute(
         """INSERT INTO metric_composite
-           (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same)
-           VALUES (?,?,?,?,?,?)""",
+           (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same,
+            biz_line, theme_domain, biz_object, biz_process)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             "cmp_cost_gap_rate",
             "成本GAP率",
@@ -238,6 +459,7 @@ def _seed(conn: sqlite3.Connection) -> None:
             json.dumps(["cmp_cost_gap", "drv_contract_total_cost"]),
             1,
             1,
+            *gap_tax,
         ),
     )
 
@@ -268,131 +490,112 @@ def _seed(conn: sqlite3.Connection) -> None:
         ],
     )
 
-    _seed_default_metric_dim_binds(conn)
+
+def _seed_default_metric_dim_binds(conn: sqlite3.Connection) -> None:
+    """Bind grain + analysis meta fields to metrics that have no binds yet."""
+    fields = list(
+        conn.execute(
+            """SELECT f.id, f.semantic_role
+               FROM meta_field f
+               JOIN meta_table t ON t.id = f.table_id
+               WHERE f.is_analysis_dim=1 AND f.enabled=1 AND t.enabled=1
+                 AND f.semantic_role IN ('grain','attr')
+               ORDER BY CASE f.semantic_role WHEN 'grain' THEN 0 ELSE 1 END,
+                        f.sort_no"""
+        )
+    )
+    if not fields:
+        return
+    field_ids = [f["id"] for f in fields]
+
+    def ensure_binds(mtype: str, mid: str) -> None:
+        n = conn.execute(
+            "SELECT COUNT(*) AS c FROM metric_dim_bind WHERE metric_type=? AND metric_id=?",
+            (mtype, mid),
+        ).fetchone()["c"]
+        if n:
+            return
+        for fid in field_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO metric_dim_bind(metric_type, metric_id, dim_id) VALUES (?,?,?)",
+                (mtype, mid, fid),
+            )
+
+    for row in conn.execute("SELECT id FROM metric_atomic"):
+        ensure_binds("atomic", row["id"])
+    for row in conn.execute("SELECT id FROM metric_derived"):
+        ensure_binds("derived", row["id"])
+    for row in conn.execute("SELECT id FROM metric_composite"):
+        ensure_binds("composite", row["id"])
 
 
-def _seed_analysis_dims(conn: sqlite3.Connection) -> None:
-    conn.executemany(
-        """INSERT OR IGNORE INTO analysis_dim
-           (id, code, name, source_table, source_field, dim_role, enabled, sort_no, remark)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        [
-            (
-                "dim_project_number",
-                "project_number",
-                "项目编号",
-                "ads_fin_tracker_comparison_summary_df",
-                "project_number",
-                "grain",
-                1,
-                10,
-                "项目粒度主键",
-            ),
-            (
-                "dim_power_plant",
-                "power_plant",
-                "电站",
-                "dim_project",
-                "power_plant",
-                "attr",
-                1,
-                20,
-                "分析展示维度",
-            ),
-            (
-                "dim_region",
-                "region",
-                "区域",
-                "dim_project",
-                "region",
-                "attr",
-                1,
-                30,
-                "分析展示维度",
-            ),
-            (
-                "dim_project_name",
-                "project_name",
-                "项目名称",
-                "dim_project",
-                "project_name",
-                "attr",
-                1,
-                40,
-                "分析展示维度",
-            ),
-        ],
+def _ensure_metric_dim_bind_schema(conn: sqlite3.Connection) -> None:
+    """Drop legacy FK to analysis_dim so dim_id can reference meta_field."""
+    fks = list(conn.execute("PRAGMA foreign_key_list(metric_dim_bind)"))
+    if not any(fk[2] == "analysis_dim" for fk in fks):
+        return
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS metric_dim_bind__new (
+            metric_type TEXT NOT NULL,
+            metric_id TEXT NOT NULL,
+            dim_id TEXT NOT NULL,
+            PRIMARY KEY (metric_type, metric_id, dim_id)
+        );
+        INSERT OR IGNORE INTO metric_dim_bind__new
+            SELECT metric_type, metric_id, dim_id FROM metric_dim_bind;
+        DROP TABLE metric_dim_bind;
+        ALTER TABLE metric_dim_bind__new RENAME TO metric_dim_bind;
+        """
     )
 
 
-def _seed_default_metric_dim_binds(conn: sqlite3.Connection) -> None:
-    """Bind grain + common analysis dims to seeded metrics."""
-    grain = "dim_project_number"
-    attrs = ["dim_power_plant", "dim_region", "dim_project_name"]
-    all_dims = [grain] + attrs
+def _migrate_binds_to_meta_fields(conn: sqlite3.Connection) -> None:
+    """Remap metric_dim_bind.dim_id from analysis_dim ids to meta_field ids."""
+    sample = conn.execute("SELECT dim_id FROM metric_dim_bind LIMIT 1").fetchone()
+    if not sample:
+        return
+    # already pointing at meta_field
+    if conn.execute(
+        "SELECT 1 FROM meta_field WHERE id=?", (sample["dim_id"],)
+    ).fetchone():
+        return
+    # build analysis_dim.code -> meta_field.id (prefer dim table for attr)
+    code_to_field: dict[str, str] = {}
+    for r in conn.execute(
+        """SELECT f.id, f.field_name, f.semantic_role, t.table_kind
+           FROM meta_field f
+           JOIN meta_table t ON t.id = f.table_id
+           WHERE f.is_analysis_dim=1
+           ORDER BY CASE
+             WHEN f.semantic_role='grain' AND t.table_kind='fact' THEN 0
+             WHEN t.table_kind='dim' THEN 1
+             ELSE 2 END"""
+    ):
+        code_to_field.setdefault(r["field_name"], r["id"])
 
-    for row in conn.execute("SELECT id FROM metric_atomic"):
-        for did in all_dims:
-            conn.execute(
-                "INSERT OR IGNORE INTO metric_dim_bind(metric_type, metric_id, dim_id) VALUES (?,?,?)",
-                ("atomic", row["id"], did),
-            )
-    for row in conn.execute("SELECT id FROM metric_derived"):
-        for did in all_dims:
-            conn.execute(
-                "INSERT OR IGNORE INTO metric_dim_bind(metric_type, metric_id, dim_id) VALUES (?,?,?)",
-                ("derived", row["id"], did),
-            )
-    for row in conn.execute("SELECT id FROM metric_composite"):
-        for did in all_dims:
-            conn.execute(
-                "INSERT OR IGNORE INTO metric_dim_bind(metric_type, metric_id, dim_id) VALUES (?,?,?)",
-                ("composite", row["id"], did),
-            )
-
-
-def _ensure_dim_catalog_and_binds(conn: sqlite3.Connection) -> None:
-    """Migrate existing DB: ensure dim catalog + backfill binds from grain_dims."""
-    _seed_analysis_dims(conn)
-    n = conn.execute("SELECT COUNT(*) AS c FROM metric_dim_bind").fetchone()["c"]
-    if n > 0:
+    if not code_to_field:
         return
 
-    code_to_id = {
-        r["code"]: r["id"]
+    adim_to_code = {
+        r["id"]: r["code"]
         for r in conn.execute("SELECT id, code FROM analysis_dim")
     }
-    grain_id = code_to_id.get("project_number")
-    attr_ids = [
-        code_to_id[c]
-        for c in ("power_plant", "region", "project_name")
-        if c in code_to_id
-    ]
 
-    def bind(mtype: str, mid: str, dim_ids: list[str]) -> None:
-        for did in dim_ids:
+    rows = list(
+        conn.execute("SELECT metric_type, metric_id, dim_id FROM metric_dim_bind")
+    )
+    conn.execute("DELETE FROM metric_dim_bind")
+    for r in rows:
+        code = adim_to_code.get(r["dim_id"])
+        fid = code_to_field.get(code) if code else None
+        if not fid:
+            fid = code_to_field.get(r["dim_id"])
+        if fid:
             conn.execute(
                 "INSERT OR IGNORE INTO metric_dim_bind(metric_type, metric_id, dim_id) VALUES (?,?,?)",
-                (mtype, mid, did),
+                (r["metric_type"], r["metric_id"], fid),
             )
-
-    for row in conn.execute("SELECT id, grain_dims FROM metric_atomic"):
-        codes = json.loads(row["grain_dims"] or "[]")
-        ids = [code_to_id[c] for c in codes if c in code_to_id]
-        if grain_id and grain_id not in ids:
-            ids.insert(0, grain_id)
-        bind("atomic", row["id"], ids + attr_ids)
-
-    for row in conn.execute("SELECT id, grain_dims FROM metric_derived"):
-        codes = json.loads(row["grain_dims"] or "[]")
-        ids = [code_to_id[c] for c in codes if c in code_to_id]
-        if grain_id and grain_id not in ids:
-            ids.insert(0, grain_id)
-        bind("derived", row["id"], ids + attr_ids)
-
-    for row in conn.execute("SELECT id FROM metric_composite"):
-        ids = ([grain_id] if grain_id else []) + attr_ids
-        bind("composite", row["id"], ids)
 
 
 # ---------- CRUD helpers ----------
@@ -409,23 +612,79 @@ def get_atomic(metric_id: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def get_atomic_by_name(name: str) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM metric_atomic WHERE name=?", (name,)
+        ).fetchone()
+
+
 def upsert_atomic(data: dict, dim_ids: list[str] | None = None) -> None:
     with get_conn() as conn:
+        data = dict(data)
         if dim_ids is not None:
-            data = dict(data)
             data["grain_dims"] = json.dumps(_grain_codes_from_dim_ids(conn, dim_ids))
+        data.setdefault("filter_json", "")
+        data.setdefault("sql_manual", 0)
+        data.setdefault("stage_type", "")
+        data.setdefault("rate_col", "")
+        data.setdefault("sql_expr", "")
+        data.setdefault("name_en", data.get("source_field") or "")
+        for k in TAXONOMY_KEYS:
+            data[k] = (data.get(k) or "").strip()
+        # keep derived stage/amount/rate + taxonomy in sync when atomic changes
         conn.execute(
             """INSERT INTO metric_atomic
-               (id, name, source_table, source_field, agg_type, grain_dims, remark)
-               VALUES (:id,:name,:source_table,:source_field,:agg_type,:grain_dims,:remark)
+               (id, name, name_en, source_table, source_field, agg_type, grain_dims, remark,
+                filter_json, sql_expr, sql_manual, stage_type, rate_col,
+                biz_line, theme_domain, biz_object, biz_process)
+               VALUES (:id,:name,:name_en,:source_table,:source_field,:agg_type,:grain_dims,:remark,
+                       :filter_json,:sql_expr,:sql_manual,:stage_type,:rate_col,
+                       :biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
+                 name_en=excluded.name_en,
                  source_table=excluded.source_table,
                  source_field=excluded.source_field,
                  agg_type=excluded.agg_type,
                  grain_dims=excluded.grain_dims,
-                 remark=excluded.remark""",
+                 remark=excluded.remark,
+                 filter_json=excluded.filter_json,
+                 sql_expr=excluded.sql_expr,
+                 sql_manual=excluded.sql_manual,
+                 stage_type=excluded.stage_type,
+                 rate_col=excluded.rate_col,
+                 biz_line=excluded.biz_line,
+                 theme_domain=excluded.theme_domain,
+                 biz_object=excluded.biz_object,
+                 biz_process=excluded.biz_process""",
             data,
+        )
+        if data.get("stage_type") or data.get("rate_col"):
+            conn.execute(
+                """UPDATE metric_derived
+                   SET stage_type=COALESCE(NULLIF(?, ''), stage_type),
+                       amount_col=?,
+                       rate_col=COALESCE(NULLIF(?, ''), rate_col)
+                   WHERE atomic_id=?""",
+                (
+                    data.get("stage_type") or "",
+                    data["source_field"],
+                    data.get("rate_col") or "",
+                    data["id"],
+                ),
+            )
+        conn.execute(
+            """UPDATE metric_derived
+               SET biz_line=?, theme_domain=?, biz_object=?, biz_process=?
+               WHERE atomic_id=?""",
+            (
+                data["biz_line"],
+                data["theme_domain"],
+                data["biz_object"],
+                data["biz_process"],
+                data["id"],
+            ),
         )
         if dim_ids is not None:
             _replace_binds(conn, "atomic", data["id"], dim_ids)
@@ -467,13 +726,34 @@ def get_derived_by_name(name: str) -> sqlite3.Row | None:
 
 def upsert_derived(data: dict, dim_ids: list[str] | None = None) -> None:
     with get_conn() as conn:
+        data = dict(data)
         if dim_ids is not None:
-            data = dict(data)
             data["grain_dims"] = json.dumps(_grain_codes_from_dim_ids(conn, dim_ids))
+        data.setdefault("filter_json", "")
+        # FX + taxonomy always inherited from atomic layer
+        atom = conn.execute(
+            """SELECT source_field, stage_type, rate_col,
+                      biz_line, theme_domain, biz_object, biz_process
+               FROM metric_atomic WHERE id=?""",
+            (data["atomic_id"],),
+        ).fetchone()
+        if not atom:
+            raise ValueError(f"来源原子不存在: {data['atomic_id']}")
+        data["amount_col"] = atom["source_field"]
+        data["stage_type"] = atom["stage_type"] or data.get("stage_type") or ""
+        data["rate_col"] = atom["rate_col"] or data.get("rate_col") or ""
+        for k in TAXONOMY_KEYS:
+            data[k] = (atom[k] or "").strip()
+        if not data["stage_type"]:
+            raise ValueError("来源原子未维护业务阶段 stage_type")
+        if not data["rate_col"]:
+            raise ValueError("来源原子未维护同阶段汇率字段 rate_col")
         conn.execute(
             """INSERT INTO metric_derived
-               (id, name, atomic_id, stage_type, amount_col, rate_col, grain_dims, exposed)
-               VALUES (:id,:name,:atomic_id,:stage_type,:amount_col,:rate_col,:grain_dims,:exposed)
+               (id, name, atomic_id, stage_type, amount_col, rate_col, grain_dims, exposed, filter_json,
+                biz_line, theme_domain, biz_object, biz_process)
+               VALUES (:id,:name,:atomic_id,:stage_type,:amount_col,:rate_col,:grain_dims,:exposed,:filter_json,
+                       :biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
                  atomic_id=excluded.atomic_id,
@@ -481,7 +761,12 @@ def upsert_derived(data: dict, dim_ids: list[str] | None = None) -> None:
                  amount_col=excluded.amount_col,
                  rate_col=excluded.rate_col,
                  grain_dims=excluded.grain_dims,
-                 exposed=excluded.exposed""",
+                 exposed=excluded.exposed,
+                 filter_json=excluded.filter_json,
+                 biz_line=excluded.biz_line,
+                 theme_domain=excluded.theme_domain,
+                 biz_object=excluded.biz_object,
+                 biz_process=excluded.biz_process""",
             data,
         )
         if dim_ids is not None:
@@ -518,18 +803,142 @@ def get_composite_by_name(name: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def _metric_taxonomy_on_conn(conn: sqlite3.Connection, metric_id: str) -> dict[str, str]:
+    """Resolve business taxonomy for any metric id (atomic / derived / composite)."""
+    if not metric_id:
+        return empty_taxonomy()
+    row = conn.execute(
+        """SELECT biz_line, theme_domain, biz_object, biz_process
+           FROM metric_atomic WHERE id=?""",
+        (metric_id,),
+    ).fetchone()
+    if row:
+        return _row_taxonomy(row)
+    row = conn.execute(
+        """SELECT biz_line, theme_domain, biz_object, biz_process
+           FROM metric_derived WHERE id=?""",
+        (metric_id,),
+    ).fetchone()
+    if row:
+        return _row_taxonomy(row)
+    row = conn.execute(
+        """SELECT biz_line, theme_domain, biz_object, biz_process
+           FROM metric_composite WHERE id=?""",
+        (metric_id,),
+    ).fetchone()
+    return _row_taxonomy(row)
+
+
+def get_metric_taxonomy(metric_id: str) -> dict[str, str]:
+    with get_conn() as conn:
+        return _metric_taxonomy_on_conn(conn, metric_id)
+
+
+def _metric_name_map(conn: sqlite3.Connection, metric_ids: list[str]) -> dict[str, str]:
+    """id -> Chinese name for given metric ids across three layers."""
+    if not metric_ids:
+        return {}
+    out: dict[str, str] = {}
+    placeholders = ",".join("?" * len(metric_ids))
+    for table in ("metric_atomic", "metric_derived", "metric_composite"):
+        for r in conn.execute(
+            f"SELECT id, name FROM {table} WHERE id IN ({placeholders})",
+            metric_ids,
+        ):
+            out[r["id"]] = r["name"]
+    return out
+
+
+def first_formula_metric_id(
+    formula: str, sub_metric_ids: list[str] | None = None
+) -> str | None:
+    """First metric appearing in formula text (longest-name scan); fallback to first sub id."""
+    with get_conn() as conn:
+        return _first_formula_metric_id_on_conn(conn, formula, sub_metric_ids or [])
+
+
+def _first_formula_metric_id_on_conn(
+    conn: sqlite3.Connection, formula: str, sub_metric_ids: list[str]
+) -> str | None:
+    ids = [x for x in (sub_metric_ids or []) if x]
+    name_by_id = _metric_name_map(conn, ids)
+    # If formula empty, use first checked sub
+    formula = (formula or "").strip()
+    if not formula:
+        return ids[0] if ids else None
+    # Prefer names of selected subs; if none, scan all known metrics
+    if not name_by_id:
+        name_by_id = {}
+        for table in ("metric_atomic", "metric_derived", "metric_composite"):
+            for r in conn.execute(f"SELECT id, name FROM {table}"):
+                name_by_id[r["id"]] = r["name"]
+    # Find earliest occurrence among longest names first (avoid partial overlaps)
+    best_id = None
+    best_pos = len(formula) + 1
+    for mid, name in sorted(name_by_id.items(), key=lambda x: -len(x[1] or "")):
+        if not name:
+            continue
+        pos = formula.find(name)
+        if pos >= 0 and pos < best_pos:
+            best_pos = pos
+            best_id = mid
+    if best_id:
+        return best_id
+    return ids[0] if ids else None
+
+
+def taxonomy_from_formula(
+    formula: str, sub_metric_ids: list[str] | None = None
+) -> dict[str, str]:
+    """Business taxonomy defaulted from the first metric in the formula."""
+    with get_conn() as conn:
+        mid = _first_formula_metric_id_on_conn(conn, formula, sub_metric_ids or [])
+        return _metric_taxonomy_on_conn(conn, mid or "")
+
+
 def upsert_composite(data: dict, dim_ids: list[str] | None = None) -> None:
     with get_conn() as conn:
+        data = dict(data)
+        subs = data.get("sub_metric_ids") or "[]"
+        if isinstance(subs, str):
+            try:
+                sub_ids = json.loads(subs)
+            except json.JSONDecodeError:
+                sub_ids = []
+        else:
+            sub_ids = list(subs)
+            data["sub_metric_ids"] = json.dumps(sub_ids)
+        defaults = _metric_taxonomy_on_conn(
+            conn,
+            _first_formula_metric_id_on_conn(conn, data.get("formula") or "", sub_ids)
+            or "",
+        )
+        # 业务线 / 主题域 always follow first formula metric
+        data["biz_line"] = defaults["biz_line"]
+        data["theme_domain"] = defaults["theme_domain"]
+        # 业务对象 / 业务过程 editable; empty → default from first metric
+        data["biz_object"] = (data.get("biz_object") or "").strip() or defaults[
+            "biz_object"
+        ]
+        data["biz_process"] = (data.get("biz_process") or "").strip() or defaults[
+            "biz_process"
+        ]
         conn.execute(
             """INSERT INTO metric_composite
-               (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same)
-               VALUES (:id,:name,:formula,:sub_metric_ids,:check_currency_same,:check_granularity_same)
+               (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same,
+                biz_line, theme_domain, biz_object, biz_process)
+               VALUES (:id,:name,:formula,:sub_metric_ids,:check_currency_same,:check_granularity_same,
+                       :biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
                  formula=excluded.formula,
                  sub_metric_ids=excluded.sub_metric_ids,
                  check_currency_same=excluded.check_currency_same,
-                 check_granularity_same=excluded.check_granularity_same""",
+                 check_granularity_same=excluded.check_granularity_same,
+                 biz_line=excluded.biz_line,
+                 theme_domain=excluded.theme_domain,
+                 biz_object=excluded.biz_object,
+                 biz_process=excluded.biz_process""",
             data,
         )
         if dim_ids is not None:
@@ -563,74 +972,26 @@ def stage_map() -> dict[str, tuple[str, str]]:
     return {s: (a, r) for s, a, r in STAGES}
 
 
-# ---------- Analysis dimension catalog & binds ----------
+# ---------- Analysis dimension binds (meta_field ids) ----------
 
-def list_analysis_dims(enabled_only: bool = False) -> list[sqlite3.Row]:
-    sql = "SELECT * FROM analysis_dim"
-    if enabled_only:
-        sql += " WHERE enabled=1"
-    sql += " ORDER BY sort_no, code"
+def list_metric_dim_binds(metric_type: str, metric_id: str) -> list[dict]:
     with get_conn() as conn:
-        return list(conn.execute(sql))
-
-
-def get_analysis_dim(dim_id: str) -> sqlite3.Row | None:
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM analysis_dim WHERE id=?", (dim_id,)
-        ).fetchone()
-
-
-def get_analysis_dim_by_code(code: str) -> sqlite3.Row | None:
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM analysis_dim WHERE code=?", (code,)
-        ).fetchone()
-
-
-def upsert_analysis_dim(data: dict) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO analysis_dim
-               (id, code, name, source_table, source_field, dim_role, enabled, sort_no, remark)
-               VALUES (:id,:code,:name,:source_table,:source_field,:dim_role,:enabled,:sort_no,:remark)
-               ON CONFLICT(id) DO UPDATE SET
-                 code=excluded.code,
-                 name=excluded.name,
-                 source_table=excluded.source_table,
-                 source_field=excluded.source_field,
-                 dim_role=excluded.dim_role,
-                 enabled=excluded.enabled,
-                 sort_no=excluded.sort_no,
-                 remark=excluded.remark""",
-            data,
-        )
-        conn.commit()
-
-
-def delete_analysis_dim(dim_id: str) -> None:
-    with get_conn() as conn:
-        used = conn.execute(
-            "SELECT COUNT(*) AS c FROM metric_dim_bind WHERE dim_id=?", (dim_id,)
-        ).fetchone()["c"]
-        if used:
-            raise ValueError(f"维度仍被 {used} 个指标绑定，无法删除")
-        conn.execute("DELETE FROM analysis_dim WHERE id=?", (dim_id,))
-        conn.commit()
-
-
-def list_metric_dim_binds(metric_type: str, metric_id: str) -> list[sqlite3.Row]:
-    with get_conn() as conn:
-        return list(
-            conn.execute(
-                """SELECT d.*
-                   FROM metric_dim_bind b
-                   JOIN analysis_dim d ON d.id = b.dim_id
-                   WHERE b.metric_type=? AND b.metric_id=?
-                   ORDER BY d.sort_no, d.code""",
-                (metric_type, metric_id),
-            )
-        )
+        rows = conn.execute(
+            """SELECT f.id, f.field_name AS code, f.display_name AS name,
+                      f.semantic_role,
+                      CASE WHEN f.semantic_role='grain' THEN 'grain' ELSE 'attr' END AS dim_role,
+                      f.enabled, f.sort_no, f.is_analysis_dim,
+                      t.physical_name AS source_table, f.field_name AS source_field,
+                      t.table_kind AS origin, t.name AS table_name
+               FROM metric_dim_bind b
+               JOIN meta_field f ON f.id = b.dim_id
+               JOIN meta_table t ON t.id = f.table_id
+               WHERE b.metric_type=? AND b.metric_id=?
+               ORDER BY CASE f.semantic_role WHEN 'grain' THEN 0 ELSE 1 END,
+                        f.sort_no, f.field_name""",
+            (metric_type, metric_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def list_metric_dim_ids(metric_type: str, metric_id: str) -> list[str]:
@@ -644,7 +1005,8 @@ def metric_bound_dim_labels(metric_type: str, metric_id: str) -> str:
     parts = []
     for r in rows:
         tag = "粒" if r["dim_role"] == "grain" else "析"
-        parts.append(f"{r['name']}[{tag}]")
+        origin = "fact" if r.get("origin") == "fact" else "dim"
+        parts.append(f"{r['name']}[{tag}/{origin}]")
     return "、".join(parts)
 
 
@@ -683,20 +1045,19 @@ def _replace_binds(
 ) -> None:
     if not dim_ids:
         raise ValueError("至少绑定一个分析/粒度维度")
-    # must include at least one grain for atomic/derived; composite recommended
     roles = {
-        r["id"]: r["dim_role"]
+        r["id"]: r["semantic_role"]
         for r in conn.execute(
-            f"SELECT id, dim_role FROM analysis_dim WHERE id IN ({','.join('?'*len(dim_ids))})",
+            f"SELECT id, semantic_role FROM meta_field WHERE id IN ({','.join('?'*len(dim_ids))})",
             dim_ids,
         )
     }
     if len(roles) != len(set(dim_ids)):
-        raise ValueError("存在无效维度 ID")
+        raise ValueError("存在无效字段 ID（请在元数据中勾选「用于分析维度」）")
     if metric_type in ("atomic", "derived") and not any(
         roles[i] == "grain" for i in dim_ids
     ):
-        raise ValueError("原子/派生指标必须至少绑定一个「粒度」维度")
+        raise ValueError("原子/派生指标必须至少绑定一个「粒度」字段")
     conn.execute(
         "DELETE FROM metric_dim_bind WHERE metric_type=? AND metric_id=?",
         (metric_type, metric_id),
@@ -712,8 +1073,8 @@ def _grain_codes_from_dim_ids(conn: sqlite3.Connection, dim_ids: list[str]) -> l
     if not dim_ids:
         return ["project_number"]
     rows = conn.execute(
-        f"""SELECT code FROM analysis_dim
-            WHERE id IN ({','.join('?'*len(dim_ids))}) AND dim_role='grain'
+        f"""SELECT field_name AS code FROM meta_field
+            WHERE id IN ({','.join('?'*len(dim_ids))}) AND semantic_role='grain'
             ORDER BY sort_no""",
         dim_ids,
     ).fetchall()

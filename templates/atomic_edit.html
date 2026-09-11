@@ -3,21 +3,90 @@
 {% block content %}
 <div class="card">
   <h1>{{ '编辑' if row else '新增' }}原子指标</h1>
-  <form method="post">
+  <form method="post" id="atomic-form">
     {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
     <label>名称</label>
     <input type="text" name="name" required value="{{ row.name if row else '' }}">
+    <label>英文名称</label>
+    <input type="text" name="name_en" id="name_en" required pattern="[A-Za-z_][A-Za-z0-9_]*"
+      placeholder="如 pj_total_cost"
+      value="{{ row.name_en if row and row.name_en else (row.source_field if row else '') }}">
+    <p class="muted">用作 SQL 别名（字母/数字/下划线）。</p>
     <label>来源表</label>
-    <input type="text" name="source_table" required value="{{ row.source_table if row else 'ads_fin_tracker_comparison_summary_df' }}">
-    <label>来源字段</label>
-    <input type="text" name="source_field" required value="{{ row.source_field if row else '' }}">
+    <input type="text" name="source_table" id="source_table" required value="{{ row.source_table if row else 'ads_fin_tracker_comparison_summary_df' }}">
+    <label>来源字段（金额/度量）</label>
+    <input type="text" name="source_field" id="source_field" required value="{{ row.source_field if row else '' }}">
     <label>聚合</label>
-    <select name="agg_type">
+    <select name="agg_type" id="agg_type">
       {% set agg = row.agg_type if row else 'SUM' %}
       <option value="SUM" {% if agg=='SUM' %}selected{% endif %}>SUM</option>
       <option value="MAX" {% if agg=='MAX' %}selected{% endif %}>MAX</option>
       <option value="MIN" {% if agg=='MIN' %}selected{% endif %}>MIN</option>
     </select>
+
+    <label>业务阶段（金额类原子）</label>
+    <select name="stage_type" id="stage_type">
+      <option value="">— 非阶段金额 —</option>
+      {% for s, amount, rate in stages %}
+      <option value="{{ s }}"
+        data-amount="{{ amount }}" data-rate="{{ rate }}"
+        {% if row and row.stage_type==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <label>同阶段汇率字段</label>
+    <input type="text" name="rate_col" id="rate_col" placeholder="如 pj_exchange_rate"
+      value="{{ row.rate_col if row and row.rate_col else '' }}">
+    <p class="muted">各阶段金额/汇率字段在原子层维护；派生指标继承，不再单独改写。</p>
+
+    <label>业务线</label>
+    <select name="biz_line" id="biz_line">
+      <option value="">— 请选择 —</option>
+      {% for n in biz_catalog.line %}
+      <option value="{{ n.name_zh }}" data-id="{{ n.id }}"
+        {% if row and row.biz_line==n.name_zh %}selected{% endif %}>{{ n.name_zh }}{% if n.name_en %} ({{ n.name_en }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <label>主题域</label>
+    <select name="theme_domain" id="theme_domain">
+      <option value="">— 请选择 —</option>
+      {% for n in biz_catalog.domain %}
+      <option value="{{ n.name_zh }}" data-id="{{ n.id }}" data-parent="{{ n.parent_id }}"
+        {% if row and row.theme_domain==n.name_zh %}selected{% endif %}>{{ n.name_zh }}{% if n.name_en %} ({{ n.name_en }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <label>业务对象</label>
+    <select name="biz_object" id="biz_object">
+      <option value="">— 请选择 —</option>
+      {% for n in biz_catalog.object %}
+      <option value="{{ n.name_zh }}" data-id="{{ n.id }}" data-parent="{{ n.parent_id }}"
+        {% if row and row.biz_object==n.name_zh %}selected{% endif %}>{{ n.name_zh }}{% if n.name_en %} ({{ n.name_en }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <label>业务过程</label>
+    <select name="biz_process" id="biz_process">
+      <option value="">— 请选择 —</option>
+      {% for n in biz_catalog.process %}
+      <option value="{{ n.name_zh }}" data-id="{{ n.id }}" data-parent="{{ n.parent_id }}"
+        {% if row and row.biz_process==n.name_zh %}selected{% endif %}>{{ n.name_zh }}{% if n.name_en %} ({{ n.name_en }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <p class="muted">选项来自「业务架构」主数据（支架 → 财务 → 项目 → 阶段过程）；派生只读继承；复合可改对象/过程。</p>
+
+    {% include "_filters.html" %}
+
+    <label>指标 SQL</label>
+    <p class="muted">默认格式 <code>SELECT m.字段 AS 英文名 FROM 表 m</code>；上方字段/过滤变更时自动更新（勾选手工改写后不再自动覆盖）。</p>
+    <textarea name="sql_expr" id="sql_expr" rows="8" style="font-family:var(--mono);max-width:100%">{{ row.sql_expr if row and row.sql_expr else '' }}</textarea>
+    <label><input type="checkbox" name="sql_manual" id="sql_manual" value="1" {% if row and row.sql_manual %}checked{% endif %}> 手工改写 SQL（勾选后停止自动更新）</label>
+    <p class="actions">
+      <button type="button" class="secondary" id="regen-sql">重新生成</button>
+      <button type="button" id="run-sql">执行</button>
+    </p>
+    <div id="sql-preview-box" class="sql-preview-box" hidden>
+      <p id="sql-preview-status" class="muted" style="margin:0.4rem 0"></p>
+      <div id="sql-preview-table-wrap" style="overflow:auto;max-width:100%"></div>
+    </div>
+
     {% include "_dim_bind.html" %}
     <label>备注</label>
     <input type="text" name="remark" value="{{ row.remark if row else '' }}">
@@ -27,4 +96,169 @@
     </p>
   </form>
 </div>
+<script>
+(function () {
+  const stageSel = document.getElementById('stage_type');
+  const rateInput = document.getElementById('rate_col');
+  const fieldInput = document.getElementById('source_field');
+  const nameEnInput = document.getElementById('name_en');
+  const tableInput = document.getElementById('source_table');
+  const filterInput = document.getElementById('filter_text');
+  const sqlInput = document.getElementById('sql_expr');
+  const manualChk = document.getElementById('sql_manual');
+  const previewBox = document.getElementById('sql-preview-box');
+  const previewStatus = document.getElementById('sql-preview-status');
+  const previewTableWrap = document.getElementById('sql-preview-table-wrap');
+  let syncing = false;
+
+  stageSel.addEventListener('change', () => {
+    const opt = stageSel.selectedOptions[0];
+    if (opt && opt.dataset.rate) rateInput.value = opt.dataset.rate;
+    if (opt && opt.dataset.amount) {
+      if (!fieldInput.value) fieldInput.value = opt.dataset.amount;
+      if (!nameEnInput.value) nameEnInput.value = opt.dataset.amount;
+    }
+    autoSyncSql();
+  });
+
+  fieldInput.addEventListener('input', () => {
+    if (!nameEnInput.dataset.touched) nameEnInput.value = fieldInput.value;
+    autoSyncSql();
+  });
+  nameEnInput.addEventListener('input', () => {
+    nameEnInput.dataset.touched = '1';
+    autoSyncSql();
+  });
+
+  function buildPreview() {
+    const table = tableInput.value || 'ads_fin_tracker_comparison_summary_df';
+    const field = fieldInput.value || 'amount';
+    const nameEn = (nameEnInput.value || '').trim() || field;
+    const pred = (filterInput.value || '').trim();
+    let amount = 'm.' + field;
+    if (pred) amount = 'CASE WHEN (' + pred + ') THEN ' + amount + ' END';
+    return 'SELECT\n  ' + amount + ' AS ' + nameEn + '\nFROM ' + table + ' m';
+  }
+
+  function autoSyncSql() {
+    if (manualChk.checked) return;
+    syncing = true;
+    sqlInput.value = buildPreview();
+    syncing = false;
+  }
+
+  [tableInput, filterInput].forEach(el => {
+    el.addEventListener('input', autoSyncSql);
+    el.addEventListener('change', autoSyncSql);
+  });
+
+  sqlInput.addEventListener('input', () => {
+    if (syncing) return;
+    manualChk.checked = true;
+  });
+
+  manualChk.addEventListener('change', () => {
+    if (!manualChk.checked) autoSyncSql();
+  });
+
+  document.getElementById('regen-sql').addEventListener('click', () => {
+    manualChk.checked = false;
+    autoSyncSql();
+  });
+
+  document.getElementById('run-sql').addEventListener('click', async () => {
+    previewBox.hidden = false;
+    previewStatus.textContent = '执行中…';
+    previewStatus.className = 'muted';
+    previewTableWrap.innerHTML = '';
+    try {
+      const resp = await fetch('{{ url_for("atomic_preview_sql") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: sqlInput.value })
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        previewStatus.textContent = '执行失败：' + (data.error || '未知错误');
+        previewStatus.className = 'err-box is-err';
+        return;
+      }
+      const tip = data.truncated
+        ? ('成功，展示前 ' + data.row_count + ' 行（已截断）')
+        : ('成功，共 ' + data.row_count + ' 行');
+      previewStatus.textContent = tip;
+      previewStatus.className = 'muted';
+      if (!data.columns || !data.columns.length) {
+        previewTableWrap.innerHTML = '<p class="muted">无列返回</p>';
+        return;
+      }
+      let html = '<table class="preview-table"><thead><tr>';
+      data.columns.forEach(c => { html += '<th>' + escapeHtml(c) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      (data.rows || []).forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+          html += '<td>' + escapeHtml(cell === null || cell === undefined ? '' : String(cell)) + '</td>';
+        });
+        html += '</tr>';
+      });
+      if (!(data.rows || []).length) html += '<tr><td colspan="' + data.columns.length + '">无数据</td></tr>';
+      html += '</tbody></table>';
+      previewTableWrap.innerHTML = html;
+    } catch (e) {
+      previewStatus.textContent = '请求失败：' + e;
+      previewStatus.className = 'err-box is-err';
+    }
+  });
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+  }
+
+  if (nameEnInput.value) nameEnInput.dataset.touched = '1';
+  if (!sqlInput.value || !manualChk.checked) autoSyncSql();
+
+  // cascading business architecture selects
+  (function cascadeBiz() {
+    const lineSel = document.getElementById('biz_line');
+    const domainSel = document.getElementById('theme_domain');
+    const objectSel = document.getElementById('biz_object');
+    const processSel = document.getElementById('biz_process');
+    if (!lineSel || !domainSel || !objectSel || !processSel) return;
+
+    function selectedId(sel) {
+      const opt = sel.selectedOptions[0];
+      return opt && opt.dataset.id ? opt.dataset.id : '';
+    }
+    function filterByParent(sel, parentId, keepValue) {
+      const cur = keepValue || sel.value;
+      Array.from(sel.options).forEach((opt, i) => {
+        if (i === 0) { opt.hidden = false; return; }
+        const ok = !parentId || opt.dataset.parent === parentId;
+        opt.hidden = !ok;
+        if (!ok && opt.selected) opt.selected = false;
+      });
+      if (cur) {
+        const match = Array.from(sel.options).find(o => o.value === cur && !o.hidden);
+        if (match) sel.value = cur;
+        else sel.value = '';
+      }
+    }
+    function refresh(preserve) {
+      const lineId = selectedId(lineSel);
+      filterByParent(domainSel, lineId, preserve ? domainSel.value : '');
+      const domainId = selectedId(domainSel);
+      filterByParent(objectSel, domainId, preserve ? objectSel.value : '');
+      const objectId = selectedId(objectSel);
+      filterByParent(processSel, objectId, preserve ? processSel.value : '');
+    }
+    lineSel.addEventListener('change', () => refresh(false));
+    domainSel.addEventListener('change', () => refresh(false));
+    objectSel.addEventListener('change', () => refresh(false));
+    refresh(true);
+  })();
+})();
+</script>
 {% endblock %}

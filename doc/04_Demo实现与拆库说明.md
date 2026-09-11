@@ -6,16 +6,33 @@
 
 | 方案能力 | 代码文件 |
 |---|---|
-| SQLite schema / 种子 / CRUD | `db.py` |
+| SQLite schema / 种子 / 指标 CRUD / 维度绑定 | `db.py` |
+| 数仓表/字段/关系元数据 | `meta.py` |
+| 业务架构（线/域/对象/过程） | `biz_arch.py` |
+| 原子/派生 SQL 预览与过滤安全 | `metric_sql.py` |
 | 规则引擎（汇率、币种、复合、校验、JOIN） | `engine.py` |
+| 指标依赖地图数据 | `metric_map.py` |
 | 意图解析（表单 + 关键词） | `intent.py` |
 | 中文展示（意图/审计/列名） | `display.py` |
-| Web 管理与问数 | `app.py` + `templates/` |
+| Web 管理与问数 | `app.py` + `templates/` + `static/style.css` |
 | 方案与计算文档 | `doc/` |
 
-## 2. 推荐仓库目录（拆库后根目录）
+## 2. Web 模块一览
 
-将当前 `metric_t2sql_demo/` **整体**作为新仓库根即可：
+| 模块 | 入口 | 说明 |
+|---|---|---|
+| 指标管理 | `/metrics` | 三类指标卡片（矢量图标 + 帮助文案 + 数量）；进入列表后用 Tab 切换 |
+| 原子 / 派生 / 复合 | `/metrics/{atomic\|derived\|composite}` | CRUD、SQL 预览、紧凑表省略展示 |
+| 指标地图 | `/metrics/map` | 复合向下展开依赖树；孤立指标单独列出 |
+| 业务架构 | `/meta/biz-arch` | 四级分类树维护 |
+| 元数据 / 维度关系 | `/meta/tables`、`/meta/rels` | 表字段与 JOIN |
+| 问数 Demo | `/ask` | 表单或关键词 → 引擎执行 |
+
+顶栏**不再**并列「原子指标 / 派生指标 / 复合指标」三个入口，统一为「指标管理」。
+
+## 3. 推荐仓库目录（拆库后根目录）
+
+将当前工程**整体**作为新仓库根即可：
 
 ```text
 .
@@ -24,11 +41,22 @@
 ├── .gitignore
 ├── app.py
 ├── db.py
+├── meta.py
+├── biz_arch.py
+├── metric_sql.py
+├── metric_map.py
 ├── engine.py
 ├── intent.py
 ├── display.py
 ├── static/
+│   └── style.css             # 含 metric-hub / metric-tabs / table.compact
 ├── templates/
+│   ├── base.html             # 顶栏导航
+│   ├── metrics.html          # 指标管理总览
+│   ├── _metric_tabs.html     # 列表页类型 Tab
+│   ├── atomic_*.html / derived_*.html / composite_*.html
+│   ├── meta_*.html / biz_arch*.html / metric_map.html / ask.html
+│   └── _filters.html / _dim_bind.html
 ├── data/                     # demo.db 运行时生成，勿提交
 └── doc/                      # 本目录：方案 + 计算 + 元数据
     ├── README.md
@@ -38,12 +66,14 @@
     └── 04_Demo实现与拆库说明.md
 ```
 
-## 3. 拆库步骤（建议）
+## 4. 拆库步骤（建议）
 
-1. 复制或 `git subtree` / 新建空库后拷贝上述文件（**不要**拷贝 `.venv/`、`data/*.db`）。
-2. 确认根 `README.md` 仅引用 `doc/`，不依赖原「支架项目」路径。
+1. 复制或 `git subtree` / 新建空库后拷贝上述文件（**不要**拷贝 `.venv/`、`data/*.db`、`__pycache__/`）。
+2. 确认根 `README.md` 仅引用 `doc/`，不依赖原旁路项目路径。
 3. `python -m venv .venv && pip install -r requirements.txt && python app.py`。
-4. 浏览器打开 `http://127.0.0.1:5050`，按 `doc/02` 样例验算 GAP=1540。
+4. 浏览器打开 `http://127.0.0.1:5050`：
+   - 顶栏进入 **指标管理**，核对三类卡片帮助文案；
+   - **问数 Demo** 按 `doc/02` 验算 GAP=1540。
 5. （可选）删改种子数据表名/字段以对接新业务，但保留元数据表结构与引擎约束。
 
 ### 快速初始化命令
@@ -61,22 +91,25 @@ python -m venv .venv
 # .venv/bin/python app.py
 ```
 
-## 4. 明确不在 Demo / 首版库内的范围
+> 开发时若关闭 Flask reloader（`use_reloader=False`），改路由后需**手动重启**进程，否则会出现 `BuildError: metrics_hub` 一类旧进程未加载新端点的问题。
+
+## 5. 明确不在 Demo / 首版库内的范围
 
 - 真实大模型 API（意图层可后续替换 `intent.py`）
 - MaxCompute / 生产数仓直连（替换执行层即可）
 - 登录权限、审批流、Excel 批量导入
 - 通用公式 AST（当前为子指标名 + 四则运算）
+- 独立的「分析维度」CRUD 页（已并入表字段 `is_analysis_dim`）
 
-## 5. 扩展建议（拆库后）
+## 6. 扩展建议（拆库后）
 
 | 方向 | 建议 |
 |---|---|
 | 生产执行 | `engine._execute` 改为 JDBC/ODPS 客户端，SQL 方言保持引擎生成 |
 | 真 NLP | 意图输出对齐 `Intent` 数据结构，勿让模型写 SQL |
 | 配置同步 | 从指标平台 API/Excel 导入到 `metric_*` 表 |
-| 多事实表 | 扩展 `source_table` 路由与 JOIN 注册表 |
+| 多事实表 | 扩展 `source_table` 路由与 `meta_table_rel` |
 
-## 6. 与原项目关系
+## 7. 与原项目关系
 
-本 Demo 最初位于支架项目旁路目录；**方案与实现已自包含于本树**。拆库后以 `doc/01`～`03` 为规范基线，`doc/04` 为工程说明；原仓库中的 `指标体系与txttosql.md` 可作为历史稿，以本 `doc/` 为准。
+本 Demo 最初位于支架项目旁路目录；**方案与实现已自包含于本树**。拆库后以 `doc/01`～`03` 为规范基线，`doc/04` 为工程说明；历史旁路稿以本 `doc/` 为准。

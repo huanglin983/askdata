@@ -8,14 +8,123 @@
     <div class="stat"><span class="muted">原子指标</span><b>{{ atomic_n }}</b></div>
     <div class="stat"><span class="muted">派生指标</span><b>{{ derived_n }}</b></div>
     <div class="stat"><span class="muted">复合指标</span><b>{{ composite_n }}</b></div>
-    <div class="stat"><span class="muted">分析维度</span><b>{{ dim_n }}</b></div>
+    <div class="stat"><span class="muted">元数据表</span><b>{{ meta_n }}</b></div>
   </div>
     <p style="margin-top:1rem" class="actions">
     <a class="btn" href="{{ url_for('ask') }}">打开问数 Demo</a>
-    <a class="btn secondary" href="{{ url_for('dim_list') }}">管理分析维度</a>
-    <a class="btn secondary" href="{{ url_for('derived_list') }}">管理派生指标</a>
+    <a class="btn secondary" href="{{ url_for('biz_arch_view') }}">业务架构</a>
+    <a class="btn secondary" href="{{ url_for('meta_table_list') }}">表/维度元数据</a>
+    <a class="btn secondary" href="{{ url_for('metric_map_view') }}">指标地图</a>
+    <a class="btn secondary" href="{{ url_for('metrics_hub') }}">指标管理</a>
   </p>
 </div>
+
+<div class="card guide-canvas">
+  <h2 class="map-section-title">使用指引</h2>
+  <p class="muted" style="margin-top:-0.35rem;margin-bottom:1rem">按顺序配置：业务架构 → 元数据 → 关联 → 指标管理 → 问数。点击卡片可进入对应页面。</p>
+  <div class="guide-flow">
+    <a class="map-card map-type-meta guide-step" href="{{ url_for('biz_arch_view') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">业务架构</div>
+          <div class="map-card-id">step 0 · biz architecture</div>
+        </div>
+        <span class="map-badge">架构</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">配置内容</div>
+        <div class="map-card-detail">维护业务线 / 主题域 / 业务对象 / 业务过程，供指标分类引用。</div>
+        <span class="map-card-edit">去配置 →</span>
+      </div>
+    </a>
+
+    <span class="guide-arrow" aria-hidden="true"></span>
+
+    <a class="map-card map-type-meta guide-step" href="{{ url_for('meta_table_list') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">表元数据</div>
+          <div class="map-card-id">step 1 · meta tables</div>
+        </div>
+        <span class="map-badge">元数据</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">配置内容</div>
+        <div class="map-card-detail">先登记事实表 / 维度表及字段（主键、类型、业务含义）。</div>
+        <span class="map-card-edit">去配置 →</span>
+      </div>
+    </a>
+
+    <span class="guide-arrow" aria-hidden="true"></span>
+
+    <a class="map-card map-type-rel guide-step" href="{{ url_for('meta_rel_list') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">表关联关系</div>
+          <div class="map-card-id">step 2 · meta relations</div>
+        </div>
+        <span class="map-badge">关联</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">配置内容</div>
+        <div class="map-card-detail">定义事实表与维度表的 JOIN 键，供后续指标自动关联维度。</div>
+        <span class="map-card-edit">去配置 →</span>
+      </div>
+    </a>
+
+    <span class="guide-arrow" aria-hidden="true"></span>
+
+    <a class="map-card map-type-atomic guide-step" href="{{ url_for('metrics_hub') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">指标管理</div>
+          <div class="map-card-id">step 3 · metrics</div>
+        </div>
+        <span class="map-badge">指标</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">三类指标</div>
+        <div class="map-card-detail">原子绑定字段 → 派生业务切片 → 复合四则运算，统一入口配置。</div>
+        <span class="map-card-edit">去配置 →</span>
+      </div>
+    </a>
+
+    <span class="guide-arrow" aria-hidden="true"></span>
+
+    <a class="map-card map-type-derived guide-step" href="{{ url_for('ask') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">问数 Demo</div>
+          <div class="map-card-id">step 4 · ask</div>
+        </div>
+        <span class="map-badge">问数</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">验证链路</div>
+        <div class="map-card-detail">用配置好的指标发起问数，核对规则引擎生成的 SQL 与结果。</div>
+        <span class="map-card-edit">去问数 →</span>
+      </div>
+    </a>
+
+    <span class="guide-arrow" aria-hidden="true"></span>
+
+    <a class="map-card map-type-composite guide-step" href="{{ url_for('metric_map_view') }}">
+      <div class="map-card-hd">
+        <div class="map-card-titles">
+          <div class="map-card-name">指标地图</div>
+          <div class="map-card-id">step 5 · map</div>
+        </div>
+        <span class="map-badge">地图</span>
+      </div>
+      <div class="map-card-bd">
+        <div class="map-card-label">依赖总览</div>
+        <div class="map-card-detail">从复合向下展开派生 / 原子，查看依赖树与孤立指标。</div>
+        <span class="map-card-edit">去查看 →</span>
+      </div>
+    </a>
+  </div>
+</div>
+
 <div class="card">
   <h2>推荐演示路径</h2>
   <ol>

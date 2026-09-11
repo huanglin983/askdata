@@ -11,10 +11,11 @@
     <div class="brand">指标配置 · 规则引擎 Demo</div>
     <div>
       <a href="{{ url_for('index') }}">首页</a>
-      <a href="{{ url_for('dim_list') }}">分析维度</a>
-      <a href="{{ url_for('atomic_list') }}">原子指标</a>
-      <a href="{{ url_for('derived_list') }}">派生指标</a>
-      <a href="{{ url_for('composite_list') }}">复合指标</a>
+      <a href="{{ url_for('biz_arch_view') }}">业务架构</a>
+      <a href="{{ url_for('meta_table_list') }}">元数据</a>
+      <a href="{{ url_for('meta_rel_list') }}">维度关系</a>
+      <a href="{{ url_for('metrics_hub') }}">指标管理</a>
+      <a href="{{ url_for('metric_map_view') }}">指标地图</a>
       <a href="{{ url_for('ask') }}">问数 Demo</a>
     </div>
   </nav>

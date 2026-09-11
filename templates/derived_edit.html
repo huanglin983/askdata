@@ -3,28 +3,69 @@
 {% block content %}
 <div class="card">
   <h1>{{ '编辑' if row else '新增' }}派生指标</h1>
-  <form method="post">
+  <form method="post" id="derived-form">
     {% if row %}<input type="hidden" name="id" value="{{ row.id }}">{% endif %}
     <label>名称</label>
-    <input type="text" name="name" required value="{{ row.name if row else '' }}">
-    <label>来源原子</label>
-    <select name="atomic_id" required>
+    <input type="text" name="name" id="name" required value="{{ row.name if row else '' }}">
+    <label>来源原子（金额）</label>
+    <select name="atomic_id" id="atomic_id" required>
       {% for a in atomics %}
-      <option value="{{ a.id }}" {% if row and row.atomic_id==a.id %}selected{% endif %}>{{ a.name }} ({{ a.source_field }})</option>
+      <option value="{{ a.id }}"
+        data-stage="{{ a.stage_type or '' }}"
+        data-amount="{{ a.source_field }}"
+        data-rate="{{ a.rate_col or '' }}"
+        data-filters="{{ a.filter_json or '[]' }}"
+        data-biz-line="{{ a.biz_line or '' }}"
+        data-theme-domain="{{ a.theme_domain or '' }}"
+        data-biz-object="{{ a.biz_object or '' }}"
+        data-biz-process="{{ a.biz_process or '' }}"
+        {% if row and row.atomic_id==a.id %}selected{% endif %}>
+        {{ a.name }} ({{ a.source_field }}{% if a.stage_type %} · {{ a.stage_type }}{% endif %})
+      </option>
       {% endfor %}
     </select>
-    <label>业务阶段</label>
-    <select name="stage_type" id="stage_type">
-      {% for s, amount, rate in stages %}
-      <option value="{{ s }}"
-        data-amount="{{ amount }}" data-rate="{{ rate }}"
-        {% if row and row.stage_type==s %}selected{% endif %}>{{ s }}</option>
+
+    <label>继承自原子 · 业务阶段</label>
+    <input type="text" id="inherited_stage" readonly value="">
+    <label>继承自原子 · 金额字段</label>
+    <input type="text" id="inherited_amount" readonly value="">
+    <label>继承自原子 · 汇率字段</label>
+    <input type="text" id="inherited_rate" readonly value="">
+    <p class="muted">阶段汇率字段请在「原子指标」中维护；此处只读继承。</p>
+
+    <label>继承自原子 · 业务线</label>
+    <input type="text" id="inherited_biz_line" readonly value="">
+    <label>继承自原子 · 主题域</label>
+    <input type="text" id="inherited_theme_domain" readonly value="">
+    <label>继承自原子 · 业务对象</label>
+    <input type="text" id="inherited_biz_object" readonly value="">
+    <label>继承自原子 · 业务过程</label>
+    <input type="text" id="inherited_biz_process" readonly value="">
+    <p class="muted">业务分类请在「原子指标」中维护；派生指标只读引用，不可修改。</p>
+
+    <label>原子层过滤条件（只读）</label>
+    <pre id="atomic_filters_view" class="muted" style="background:#f8fafc;border:1px solid var(--line);padding:0.6rem;border-radius:6px;max-width:100%;overflow:auto;font-family:var(--mono);white-space:pre-wrap">(无)</pre>
+
+    {% include "_filters.html" %}
+
+    <label>预览币种</label>
+    <select id="preview_currency">
+      {% for c in currencies %}
+      <option value="{{ c.code }}" {% if c.code=='CNY' %}selected{% endif %}>{{ c.name }} ({{ c.code }})</option>
       {% endfor %}
     </select>
-    <label>金额字段</label>
-    <input type="text" name="amount_col" id="amount_col" value="{{ row.amount_col if row else stages[0][1] }}">
-    <label>汇率字段</label>
-    <input type="text" name="rate_col" id="rate_col" value="{{ row.rate_col if row else stages[0][2] }}">
+    <label>最终 SQL</label>
+    <p class="muted">按来源原子 + 派生过滤 + 币种规则生成；变更上方条件时自动刷新（只读，不可手工改写）。</p>
+    <textarea id="sql_expr" rows="10" readonly style="font-family:var(--mono);max-width:100%;background:#f8fafc"></textarea>
+    <p class="actions">
+      <button type="button" class="secondary" id="regen-sql">重新生成</button>
+      <button type="button" id="run-sql">执行</button>
+    </p>
+    <div id="sql-preview-box" class="sql-preview-box" hidden>
+      <p id="sql-preview-status" class="muted" style="margin:0.4rem 0"></p>
+      <div id="sql-preview-table-wrap" style="overflow:auto;max-width:100%"></div>
+    </div>
+
     {% include "_dim_bind.html" %}
     <label><input type="checkbox" name="exposed" value="1" {% if not row or row.exposed %}checked{% endif %}> 对外暴露</label>
     <p class="actions" style="margin-top:1rem">
@@ -34,12 +75,134 @@
   </form>
 </div>
 <script>
-  const sel = document.getElementById('stage_type');
-  function sync() {
+(function () {
+  const sel = document.getElementById('atomic_id');
+  const filterInput = document.getElementById('filter_text');
+  const currencySel = document.getElementById('preview_currency');
+  const sqlInput = document.getElementById('sql_expr');
+  const previewBox = document.getElementById('sql-preview-box');
+  const previewStatus = document.getElementById('sql-preview-status');
+  const previewTableWrap = document.getElementById('sql-preview-table-wrap');
+  let regenTimer = null;
+
+  function syncInherited() {
     const opt = sel.selectedOptions[0];
-    document.getElementById('amount_col').value = opt.dataset.amount;
-    document.getElementById('rate_col').value = opt.dataset.rate;
+    if (!opt) return;
+    document.getElementById('inherited_stage').value = opt.dataset.stage || '(未配置)';
+    document.getElementById('inherited_amount').value = opt.dataset.amount || '';
+    document.getElementById('inherited_rate').value = opt.dataset.rate || '(未配置)';
+    document.getElementById('inherited_biz_line').value = opt.dataset.bizLine || '(未配置)';
+    document.getElementById('inherited_theme_domain').value = opt.dataset.themeDomain || '(未配置)';
+    document.getElementById('inherited_biz_object').value = opt.dataset.bizObject || '(未配置)';
+    document.getElementById('inherited_biz_process').value = opt.dataset.bizProcess || '(未配置)';
+    const raw = (opt.dataset.filters || '').trim();
+    document.getElementById('atomic_filters_view').textContent =
+      (!raw || raw === '[]') ? '(无)' : raw;
   }
-  sel.addEventListener('change', sync);
+
+  function previewPayload(execute) {
+    return {
+      atomic_id: sel.value,
+      filter_text: filterInput.value || '',
+      currency: currencySel.value || 'CNY',
+      execute: !!execute
+    };
+  }
+
+  async function regenerateSql() {
+    sqlInput.value = '生成中…';
+    try {
+      const resp = await fetch('{{ url_for("derived_preview_sql") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPayload(false))
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        sqlInput.value = '';
+        previewBox.hidden = false;
+        previewStatus.textContent = '生成失败：' + (data.error || '未知错误');
+        previewStatus.className = 'err-box is-err';
+        previewTableWrap.innerHTML = '';
+        return;
+      }
+      sqlInput.value = data.sql || '';
+      previewStatus.textContent = '';
+      previewStatus.className = 'muted';
+    } catch (e) {
+      sqlInput.value = '';
+      previewBox.hidden = false;
+      previewStatus.textContent = '请求失败：' + e;
+      previewStatus.className = 'err-box is-err';
+    }
+  }
+
+  function scheduleRegen() {
+    clearTimeout(regenTimer);
+    regenTimer = setTimeout(regenerateSql, 250);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+  }
+
+  document.getElementById('regen-sql').addEventListener('click', regenerateSql);
+
+  document.getElementById('run-sql').addEventListener('click', async () => {
+    previewBox.hidden = false;
+    previewStatus.textContent = '执行中…';
+    previewStatus.className = 'muted';
+    previewTableWrap.innerHTML = '';
+    try {
+      const resp = await fetch('{{ url_for("derived_preview_sql") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previewPayload(true))
+      });
+      const data = await resp.json();
+      if (data.sql) sqlInput.value = data.sql;
+      if (!data.ok) {
+        previewStatus.textContent = '执行失败：' + (data.error || '未知错误');
+        previewStatus.className = 'err-box is-err';
+        return;
+      }
+      const tip = data.truncated
+        ? ('成功，展示前 ' + data.row_count + ' 行（已截断）')
+        : ('成功，共 ' + data.row_count + ' 行');
+      previewStatus.textContent = tip;
+      previewStatus.className = 'muted';
+      if (!data.columns || !data.columns.length) {
+        previewTableWrap.innerHTML = '<p class="muted">无列返回</p>';
+        return;
+      }
+      let html = '<table class="preview-table"><thead><tr>';
+      data.columns.forEach(c => { html += '<th>' + escapeHtml(c) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      (data.rows || []).forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+          html += '<td>' + escapeHtml(cell === null || cell === undefined ? '' : String(cell)) + '</td>';
+        });
+        html += '</tr>';
+      });
+      if (!(data.rows || []).length) html += '<tr><td colspan="' + data.columns.length + '">无数据</td></tr>';
+      html += '</tbody></table>';
+      previewTableWrap.innerHTML = html;
+    } catch (e) {
+      previewStatus.textContent = '请求失败：' + e;
+      previewStatus.className = 'err-box is-err';
+    }
+  });
+
+  sel.addEventListener('change', () => { syncInherited(); scheduleRegen(); });
+  filterInput.addEventListener('input', scheduleRegen);
+  currencySel.addEventListener('change', scheduleRegen);
+
+  syncInherited();
+  regenerateSql();
+})();
+
 </script>
 {% endblock %}

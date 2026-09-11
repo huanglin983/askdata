@@ -1,0 +1,6 @@
+<nav class="metric-tabs" aria-label="指标类型">
+  <a href="{{ url_for('metrics_hub') }}" class="metric-tabs-home" title="指标管理首页">指标管理</a>
+  <a href="{{ url_for('atomic_list') }}" class="{% if active == 'atomic' %}is-active{% endif %}">原子指标</a>
+  <a href="{{ url_for('derived_list') }}" class="{% if active == 'derived' %}is-active{% endif %}">派生指标</a>
+  <a href="{{ url_for('composite_list') }}" class="{% if active == 'composite' %}is-active{% endif %}">复合指标</a>
+</nav>

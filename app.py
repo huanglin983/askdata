@@ -4,12 +4,16 @@ from __future__ import annotations
 import json
 import uuid
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 import db
 import display
 import intent as intent_mod
-from engine import run
+import meta
+import metric_sql
+import biz_arch
+from engine import build_composite_sql_preview, run
+import metric_map
 
 app = Flask(__name__)
 app.secret_key = "metric-t2sql-demo-dev"
@@ -26,15 +30,15 @@ def _ensure_db():
 
 
 def _dim_form_context(metric_type: str | None = None, metric_id: str | None = None):
-    dims = db.list_analysis_dims(enabled_only=False)
+    dims = meta.list_bindable_meta_fields()
     selected = (
         db.list_metric_dim_ids(metric_type, metric_id)
         if metric_type and metric_id
         else []
     )
-    # new metric default: all enabled dims
+    # new metric default: all bindable fields
     if not selected and not metric_id:
-        selected = [d["id"] for d in dims if d["enabled"]]
+        selected = [d["id"] for d in dims]
     return dims, selected
 
 
@@ -45,50 +49,315 @@ def index():
         atomic_n=len(db.list_atomic()),
         derived_n=len(db.list_derived()),
         composite_n=len(db.list_composite()),
-        dim_n=len(db.list_analysis_dims()),
+        meta_n=len(meta.list_meta_tables()),
     )
 
 
-# ---------- Analysis dimensions ----------
-@app.route("/dims")
-def dim_list():
-    return render_template("dim_list.html", rows=db.list_analysis_dims())
+# ---------- Metrics hub ----------
+@app.route("/metrics")
+def metrics_hub():
+    return render_template(
+        "metrics.html",
+        atomic_n=len(db.list_atomic()),
+        derived_n=len(db.list_derived()),
+        composite_n=len(db.list_composite()),
+    )
 
 
-@app.route("/dims/edit", methods=["GET", "POST"])
-@app.route("/dims/edit/<dim_id>", methods=["GET", "POST"])
-def dim_edit(dim_id: str | None = None):
-    row = db.get_analysis_dim(dim_id) if dim_id else None
+# ---------- Warehouse metadata ----------
+@app.route("/meta/tables")
+def meta_table_list():
+    rows = []
+    for t in meta.list_meta_tables():
+        d = dict(t)
+        d["field_n"] = len(meta.list_meta_fields(t["id"]))
+        d["grain_keys"] = meta.get_table_grain_keys(t["id"])
+        rows.append(d)
+    return render_template("meta_table_list.html", rows=rows)
+
+
+# ---------- Business architecture ----------
+@app.route("/meta/biz-arch")
+def biz_arch_view():
+    parent_id = (request.args.get("parent_id") or "").strip() or None
+    keyword = request.args.get("q") or ""
+    enabled = request.args.get("enabled")  # '', '1', '0'
+    parent = biz_arch.get_node(parent_id) if parent_id else None
+    rows = biz_arch.list_children(parent_id, keyword=keyword, enabled=enabled or None)
+    tree = biz_arch.build_tree()
+    child_type = biz_arch.default_child_type(parent_id)
+    return render_template(
+        "biz_arch.html",
+        tree=tree,
+        rows=rows,
+        parent=parent,
+        parent_id=parent_id,
+        keyword=keyword,
+        enabled=enabled or "",
+        child_type=child_type,
+        child_type_label=biz_arch.NODE_TYPE_LABEL.get(child_type, child_type),
+        type_labels=biz_arch.NODE_TYPE_LABEL,
+    )
+
+
+@app.route("/meta/biz-arch/edit", methods=["GET", "POST"])
+@app.route("/meta/biz-arch/edit/<node_id>", methods=["GET", "POST"])
+def biz_arch_edit(node_id: str | None = None):
+    row = biz_arch.get_node(node_id) if node_id else None
+    parent_id = (
+        (row["parent_id"] if row else None)
+        or (request.args.get("parent_id") or "").strip()
+        or None
+    )
+    parent = biz_arch.get_node(parent_id) if parent_id else None
+    node_type = (
+        (row["node_type"] if row else None)
+        or request.args.get("node_type")
+        or biz_arch.default_child_type(parent_id)
+    )
     if request.method == "POST":
-        did = request.form.get("id") or f"dim_{uuid.uuid4().hex[:8]}"
-        data = {
-            "id": did,
-            "code": request.form["code"].strip(),
-            "name": request.form["name"].strip(),
-            "source_table": request.form["source_table"].strip(),
-            "source_field": request.form["source_field"].strip(),
-            "dim_role": request.form.get("dim_role", "attr"),
-            "enabled": 1 if request.form.get("enabled") else 0,
-            "sort_no": int(request.form.get("sort_no") or 100),
-            "remark": request.form.get("remark") or "",
-        }
         try:
-            db.upsert_analysis_dim(data)
-            flash("分析维度已保存", "ok")
-            return redirect(url_for("dim_list"))
+            nid = biz_arch.upsert_node(
+                {
+                    "id": request.form.get("id") or node_id or "",
+                    "parent_id": request.form.get("parent_id") or None,
+                    "node_type": request.form.get("node_type") or node_type,
+                    "name_zh": request.form["name_zh"],
+                    "name_en": request.form.get("name_en") or "",
+                    "enabled": 1 if request.form.get("enabled") else 0,
+                    "sort_no": request.form.get("sort_no") or 100,
+                    "remark": request.form.get("remark") or "",
+                }
+            )
+            flash("业务架构已保存", "ok")
+            saved = biz_arch.get_node(nid)
+            back_parent = saved["parent_id"] if saved else parent_id
+            return redirect(
+                url_for("biz_arch_view", parent_id=back_parent or None)
+            )
         except Exception as e:  # noqa: BLE001
             flash(str(e), "err")
-    return render_template("dim_edit.html", row=row)
+            parent_id = (request.form.get("parent_id") or "").strip() or None
+            parent = biz_arch.get_node(parent_id) if parent_id else None
+            node_type = request.form.get("node_type") or node_type
+    return render_template(
+        "biz_arch_edit.html",
+        row=row,
+        parent=parent,
+        parent_id=parent_id,
+        node_type=node_type,
+        type_label=biz_arch.NODE_TYPE_LABEL.get(node_type, node_type),
+        type_labels=biz_arch.NODE_TYPE_LABEL,
+    )
 
 
-@app.route("/dims/delete/<dim_id>", methods=["POST"])
-def dim_delete(dim_id: str):
+@app.route("/meta/biz-arch/batch", methods=["POST"])
+def biz_arch_batch():
+    action = (request.form.get("action") or "").strip()
+    ids = request.form.getlist("ids")
+    parent_id = (request.form.get("parent_id") or "").strip() or None
     try:
-        db.delete_analysis_dim(dim_id)
+        if action == "enable":
+            n = biz_arch.set_enabled(ids, 1)
+            flash(f"已启用 {n} 条", "ok")
+        elif action == "disable":
+            n = biz_arch.set_enabled(ids, 0)
+            flash(f"已停用 {n} 条", "ok")
+        elif action == "delete":
+            n = biz_arch.delete_nodes(ids)
+            flash(f"已删除 {n} 条", "ok")
+        else:
+            flash("未知操作", "err")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("biz_arch_view", parent_id=parent_id))
+
+
+@app.route("/meta/biz-arch/toggle/<node_id>", methods=["POST"])
+def biz_arch_toggle(node_id: str):
+    parent_id = (request.form.get("parent_id") or "").strip() or None
+    try:
+        node = biz_arch.get_node(node_id)
+        if not node:
+            raise ValueError("节点不存在")
+        biz_arch.set_enabled([node_id], 0 if node["enabled"] else 1)
+        flash("状态已更新", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("biz_arch_view", parent_id=parent_id))
+
+
+@app.route("/meta/biz-arch/delete/<node_id>", methods=["POST"])
+def biz_arch_delete(node_id: str):
+    parent_id = (request.form.get("parent_id") or "").strip() or None
+    try:
+        biz_arch.delete_nodes([node_id])
         flash("已删除", "ok")
     except Exception as e:  # noqa: BLE001
         flash(str(e), "err")
-    return redirect(url_for("dim_list"))
+    return redirect(url_for("biz_arch_view", parent_id=parent_id))
+
+
+@app.route("/meta/tables/edit", methods=["GET", "POST"])
+@app.route("/meta/tables/edit/<table_id>", methods=["GET", "POST"])
+def meta_table_edit(table_id: str | None = None):
+    row = meta.get_meta_table(table_id) if table_id else None
+    fields = meta.list_meta_fields(table_id) if table_id else []
+    physicals = meta.list_physical_tables()
+    grain_keys = meta.get_table_grain_keys(table_id) if table_id else []
+    if request.method == "POST":
+        tid = request.form.get("id") or f"tbl_{uuid.uuid4().hex[:8]}"
+        try:
+            # grain_section marks that the business-key checklist was rendered
+            grain_arg = (
+                request.form.getlist("grain_keys")
+                if "grain_section" in request.form
+                else None
+            )
+            meta.upsert_meta_table(
+                {
+                    "id": tid,
+                    "name": request.form["name"].strip(),
+                    "physical_name": request.form["physical_name"].strip(),
+                    "table_kind": request.form.get("table_kind", "dim"),
+                    "enabled": 1 if request.form.get("enabled") else 0,
+                    "remark": request.form.get("remark") or "",
+                },
+                sync_fields=True,
+                grain_keys=grain_arg,
+            )
+            flash("表元数据已保存，字段已从物理表同步", "ok")
+            return redirect(url_for("meta_table_edit", table_id=tid))
+        except Exception as e:  # noqa: BLE001
+            flash(str(e), "err")
+    return render_template(
+        "meta_table_edit.html",
+        row=row,
+        fields=fields,
+        physicals=physicals,
+        grain_keys=grain_keys,
+    )
+
+
+@app.route("/meta/tables/sync-fields/<table_id>", methods=["POST"])
+def meta_table_sync_fields(table_id: str):
+    try:
+        n = meta.sync_fields_from_physical(table_id)
+        flash(f"已同步字段，新增 {n} 个", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("meta_table_edit", table_id=table_id))
+
+
+@app.route("/meta/tables/delete/<table_id>", methods=["POST"])
+def meta_table_delete(table_id: str):
+    try:
+        meta.delete_meta_table(table_id)
+        flash("已删除", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("meta_table_list"))
+
+
+@app.route("/meta/fields/update/<field_id>", methods=["POST"])
+def meta_field_update(field_id: str):
+    table_id = request.form.get("table_id") or ""
+    try:
+        meta.update_meta_field(
+            field_id,
+            {
+                "display_name": request.form.get("display_name") or "",
+                "semantic_role": request.form.get("semantic_role") or "other",
+                "is_analysis_dim": 1 if request.form.get("is_analysis_dim") else 0,
+                "enabled": 1 if request.form.get("enabled") else 0,
+                "sort_no": request.form.get("sort_no") or 100,
+            },
+        )
+        flash("字段已更新", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("meta_table_edit", table_id=table_id))
+
+
+@app.route("/meta/rels")
+def meta_rel_list():
+    return render_template("meta_rel_list.html", rows=meta.list_meta_rels())
+
+
+@app.route("/meta/rels/edit", methods=["GET", "POST"])
+@app.route("/meta/rels/edit/<rel_id>", methods=["GET", "POST"])
+def meta_rel_edit(rel_id: str | None = None):
+    row = meta.get_meta_rel(rel_id) if rel_id else None
+    facts = meta.list_meta_tables(kind="fact")
+    dims = meta.list_meta_tables(kind="dim")
+    if request.method == "POST":
+        rid = request.form.get("id") or f"rel_{uuid.uuid4().hex[:8]}"
+        lefts = request.form.getlist("join_left")
+        rights = request.form.getlist("join_right")
+        keys = []
+        for i in range(max(len(lefts), len(rights))):
+            l = (lefts[i] if i < len(lefts) else "").strip()
+            r = (rights[i] if i < len(rights) else "").strip()
+            if l and r:
+                keys.append({"left": l, "right": r})
+        try:
+            meta.upsert_meta_rel(
+                {
+                    "id": rid,
+                    "fact_table_id": request.form["fact_table_id"],
+                    "dim_table_id": request.form["dim_table_id"],
+                    "join_type": request.form.get("join_type") or "LEFT",
+                    "join_keys_list": keys,
+                    "enabled": 1 if request.form.get("enabled") else 0,
+                    "remark": request.form.get("remark") or "",
+                },
+            )
+            flash("维度关系已保存", "ok")
+            return redirect(url_for("meta_rel_list"))
+        except Exception as e:  # noqa: BLE001
+            flash(str(e), "err")
+            row = {
+                "id": rid,
+                "fact_table_id": request.form.get("fact_table_id"),
+                "dim_table_id": request.form.get("dim_table_id"),
+                "join_type": request.form.get("join_type") or "LEFT",
+                "join_keys_list": keys,
+                "enabled": 1 if request.form.get("enabled") else 0,
+                "remark": request.form.get("remark") or "",
+            }
+    return render_template(
+        "meta_rel_edit.html",
+        row=row,
+        facts=facts,
+        dims=dims,
+    )
+
+
+@app.route("/meta/rels/match-keys", methods=["POST"])
+def meta_rel_match_keys():
+    payload = request.get_json(silent=True) or {}
+    fact_id = payload.get("fact_table_id") or ""
+    dim_id = payload.get("dim_table_id") or ""
+    try:
+        if not fact_id or not dim_id:
+            raise ValueError("请先选择事实表与维度表")
+        # ensure fields synced
+        meta.sync_fields_from_physical(fact_id)
+        meta.sync_fields_from_physical(dim_id)
+        keys = meta.match_same_name_fields(fact_id, dim_id)
+        return jsonify({"ok": True, "keys": keys})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/meta/rels/delete/<rel_id>", methods=["POST"])
+def meta_rel_delete(rel_id: str):
+    try:
+        meta.delete_meta_rel(rel_id)
+        flash("已删除", "ok")
+    except Exception as e:  # noqa: BLE001
+        flash(str(e), "err")
+    return redirect(url_for("meta_rel_list"))
 
 
 # ---------- Atomic ----------
@@ -107,19 +376,47 @@ def atomic_list():
 def atomic_edit(metric_id: str | None = None):
     row = db.get_atomic(metric_id) if metric_id else None
     dims, selected_dims = _dim_form_context("atomic", metric_id)
+    filter_text = metric_sql.row_filter_text(row) if row else ""
     if request.method == "POST":
         mid = request.form.get("id") or f"atom_{uuid.uuid4().hex[:8]}"
         dim_ids = request.form.getlist("dim_ids")
-        data = {
-            "id": mid,
-            "name": request.form["name"].strip(),
-            "source_table": request.form["source_table"].strip(),
-            "source_field": request.form["source_field"].strip(),
-            "agg_type": request.form.get("agg_type", "SUM"),
-            "grain_dims": '["project_number"]',
-            "remark": request.form.get("remark") or "",
-        }
         try:
+            filter_text = metric_sql.filter_from_form(request.form.get("filter_text"))
+            sql_manual = 1 if request.form.get("sql_manual") else 0
+            source_table = request.form["source_table"].strip()
+            source_field = request.form["source_field"].strip()
+            name_en = (request.form.get("name_en") or source_field).strip()
+            agg_type = request.form.get("agg_type", "SUM")
+            if sql_manual:
+                sql_expr = (request.form.get("sql_expr") or "").strip()
+                if not sql_expr:
+                    raise ValueError("手工改写下 SQL 不能为空")
+            else:
+                sql_expr = metric_sql.build_atomic_sql_preview(
+                    source_table=source_table,
+                    source_field=source_field,
+                    name_en=name_en,
+                    filter_text=filter_text,
+                )
+            data = {
+                "id": mid,
+                "name": request.form["name"].strip(),
+                "name_en": name_en,
+                "source_table": source_table,
+                "source_field": source_field,
+                "agg_type": agg_type,
+                "grain_dims": '["project_number"]',
+                "remark": request.form.get("remark") or "",
+                "filter_json": filter_text,
+                "sql_expr": sql_expr,
+                "sql_manual": sql_manual,
+                "stage_type": (request.form.get("stage_type") or "").strip(),
+                "rate_col": (request.form.get("rate_col") or "").strip(),
+                "biz_line": (request.form.get("biz_line") or "").strip(),
+                "theme_domain": (request.form.get("theme_domain") or "").strip(),
+                "biz_object": (request.form.get("biz_object") or "").strip(),
+                "biz_process": (request.form.get("biz_process") or "").strip(),
+            }
             db.upsert_atomic(data, dim_ids=dim_ids)
             flash("原子指标已保存", "ok")
             return redirect(url_for("atomic_list"))
@@ -127,8 +424,42 @@ def atomic_edit(metric_id: str | None = None):
             flash(str(e), "err")
             selected_dims = dim_ids
     return render_template(
-        "atomic_edit.html", row=row, dims=dims, selected_dims=selected_dims
+        "atomic_edit.html",
+        row=row,
+        dims=dims,
+        selected_dims=selected_dims,
+        filter_text=filter_text,
+        stages=db.STAGES,
+        biz_catalog=biz_arch.taxonomy_catalog(),
     )
+
+
+@app.route("/metrics/atomic/preview-sql", methods=["POST"])
+def atomic_preview_sql():
+    """Execute metric SQL for validation; returns JSON {ok, columns, rows, error, sql}."""
+    payload = request.get_json(silent=True) or {}
+    sql_raw = payload.get("sql") or request.form.get("sql") or ""
+    try:
+        sql = metric_sql.assert_executable_select(sql_raw)
+        # wrap with limit for safety
+        limited = f"SELECT * FROM ({sql}) AS _preview LIMIT 50"
+        columns, rows = [], []
+        with db.get_conn() as conn:
+            cur = conn.execute(limited)
+            columns = [d[0] for d in cur.description]
+            rows = [list(r) for r in cur.fetchall()]
+        return jsonify(
+            {
+                "ok": True,
+                "sql": sql,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "truncated": len(rows) >= 50,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e), "sql": sql_raw}), 400
 
 
 @app.route("/metrics/atomic/delete/<metric_id>", methods=["POST"])
@@ -149,33 +480,39 @@ def derived_list():
         d = dict(r)
         d["dim_labels"] = db.metric_bound_dim_labels("derived", r["id"])
         rows.append(d)
-    return render_template("derived_list.html", rows=rows, stages=db.STAGES)
+    return render_template("derived_list.html", rows=rows)
 
 
 @app.route("/metrics/derived/edit", methods=["GET", "POST"])
 @app.route("/metrics/derived/edit/<metric_id>", methods=["GET", "POST"])
 def derived_edit(metric_id: str | None = None):
     row = db.get_derived(metric_id) if metric_id else None
-    atomics = db.list_atomic()
-    stage_map = db.stage_map()
+    # Prefer amount atomics that already carry stage FX
+    atomics = [
+        a
+        for a in db.list_atomic()
+        if (a["rate_col"] or a["stage_type"]) or (row and a["id"] == row["atomic_id"])
+    ]
+    if not atomics:
+        atomics = list(db.list_atomic())
     dims, selected_dims = _dim_form_context("derived", metric_id)
+    filter_text = metric_sql.row_filter_text(row) if row else ""
     if request.method == "POST":
         mid = request.form.get("id") or f"drv_{uuid.uuid4().hex[:8]}"
-        stage = request.form["stage_type"]
-        amount_col = request.form.get("amount_col") or stage_map.get(stage, ("", ""))[0]
-        rate_col = request.form.get("rate_col") or stage_map.get(stage, ("", ""))[1]
         dim_ids = request.form.getlist("dim_ids")
-        data = {
-            "id": mid,
-            "name": request.form["name"].strip(),
-            "atomic_id": request.form["atomic_id"],
-            "stage_type": stage,
-            "amount_col": amount_col,
-            "rate_col": rate_col,
-            "grain_dims": '["project_number"]',
-            "exposed": 1 if request.form.get("exposed") else 0,
-        }
         try:
+            filter_text = metric_sql.filter_from_form(request.form.get("filter_text"))
+            data = {
+                "id": mid,
+                "name": request.form["name"].strip(),
+                "atomic_id": request.form["atomic_id"],
+                "stage_type": "",  # filled from atomic in upsert
+                "amount_col": "",
+                "rate_col": "",
+                "grain_dims": '["project_number"]',
+                "exposed": 1 if request.form.get("exposed") else 0,
+                "filter_json": filter_text,
+            }
             db.upsert_derived(data, dim_ids=dim_ids)
             flash("派生指标已保存", "ok")
             return redirect(url_for("derived_list"))
@@ -186,11 +523,74 @@ def derived_edit(metric_id: str | None = None):
         "derived_edit.html",
         row=row,
         atomics=atomics,
-        stages=db.STAGES,
-        stage_map=stage_map,
         dims=dims,
         selected_dims=selected_dims,
+        filter_text=filter_text,
+        currencies=db.list_currency_rules(),
     )
+
+
+@app.route("/metrics/derived/preview-sql", methods=["POST"])
+def derived_preview_sql():
+    """Build final derived SQL (currency-converted) and optionally execute for validation."""
+    payload = request.get_json(silent=True) or {}
+    atomic_id = (payload.get("atomic_id") or "").strip()
+    currency = (payload.get("currency") or "CNY").upper()
+    execute = payload.get("execute", True)
+    try:
+        filter_text = metric_sql.filter_from_form(payload.get("filter_text"))
+        if not atomic_id:
+            raise ValueError("请选择来源原子指标")
+        atomic = db.get_atomic(atomic_id)
+        if not atomic:
+            raise ValueError(f"原子指标不存在: {atomic_id}")
+        rule = db.get_currency_rule(currency)
+        if not rule:
+            raise ValueError(f"不支持的币种: {currency}")
+        amount_col = atomic["source_field"]
+        rate_col = atomic["rate_col"] or ""
+        if not amount_col or not rate_col:
+            raise ValueError(
+                f"原子指标未维护金额/汇率字段: {atomic['name']} "
+                f"(source_field={amount_col!r}, rate_col={rate_col!r})"
+            )
+        # Prefer atomic English name / amount field as SQL alias (stable, IDENT-safe)
+        alias = (atomic["name_en"] or "").strip() or amount_col
+        sql = metric_sql.build_derived_sql_preview(
+            source_table=atomic["source_table"],
+            amount_col=amount_col,
+            rate_col=rate_col,
+            expr_template=rule["expr_template"],
+            atomic_filter=metric_sql.row_filter_text(atomic),
+            derived_filter=filter_text,
+            alias=alias,
+            currency=currency,
+            sql_expr=atomic["sql_expr"] if "sql_expr" in atomic.keys() else None,
+            sql_manual=bool(atomic["sql_manual"]) if "sql_manual" in atomic.keys() else False,
+        )
+        if not execute:
+            return jsonify({"ok": True, "sql": sql, "currency": currency})
+
+        sql = metric_sql.assert_executable_select(sql)
+        limited = f"SELECT * FROM ({sql}) AS _preview LIMIT 50"
+        columns, rows = [], []
+        with db.get_conn() as conn:
+            cur = conn.execute(limited)
+            columns = [d[0] for d in cur.description]
+            rows = [list(r) for r in cur.fetchall()]
+        return jsonify(
+            {
+                "ok": True,
+                "sql": sql,
+                "currency": currency,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "truncated": len(rows) >= 50,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.route("/metrics/derived/delete/<metric_id>", methods=["POST"])
@@ -219,6 +619,14 @@ def composite_list():
 @app.route("/metrics/composite/edit/<metric_id>", methods=["GET", "POST"])
 def composite_edit(metric_id: str | None = None):
     row = db.get_composite(metric_id) if metric_id else None
+    # Prefer amount atomics (with stage FX); fall back to full list
+    atomics = [
+        a
+        for a in db.list_atomic()
+        if a["rate_col"] or a["stage_type"]
+    ]
+    if not atomics:
+        atomics = list(db.list_atomic())
     derived = db.list_derived(exposed_only=True)
     composites = [c for c in db.list_composite() if not row or c["id"] != row["id"]]
     selected = json.loads(row["sub_metric_ids"]) if row else []
@@ -236,6 +644,8 @@ def composite_edit(metric_id: str | None = None):
             "check_granularity_same": 1
             if request.form.get("check_granularity_same")
             else 0,
+            "biz_object": (request.form.get("biz_object") or "").strip(),
+            "biz_process": (request.form.get("biz_process") or "").strip(),
         }
         try:
             db.upsert_composite(data, dim_ids=dim_ids)
@@ -248,12 +658,67 @@ def composite_edit(metric_id: str | None = None):
     return render_template(
         "composite_edit.html",
         row=row,
+        atomics=atomics,
         derived=derived,
         composites=composites,
         selected=selected,
         dims=dims,
         selected_dims=selected_dims,
+        currencies=[c for c in db.list_currency_rules() if c["code"] != "USD"],
+        taxonomy_defaults=db.taxonomy_from_formula(
+            (row["formula"] if row else "") or "",
+            selected,
+        ),
+        biz_catalog=biz_arch.taxonomy_catalog(),
     )
+
+
+@app.route("/metrics/composite/preview-sql", methods=["POST"])
+def composite_preview_sql():
+    """Build final composite SQL (formula expanded) and optionally execute for validation."""
+    payload = request.get_json(silent=True) or {}
+    formula = (payload.get("formula") or "").strip()
+    sub_ids = payload.get("sub_metric_ids") or []
+    if isinstance(sub_ids, str):
+        sub_ids = [sub_ids] if sub_ids else []
+    currency = (payload.get("currency") or "CNY").upper()
+    if currency == "USD":
+        return jsonify({"ok": False, "error": "复合指标预览不支持美元"}), 400
+    execute = payload.get("execute", True)
+    metric_id = (payload.get("id") or "preview").strip() or "preview"
+    try:
+        sql = build_composite_sql_preview(
+            formula=formula,
+            sub_metric_ids=list(sub_ids),
+            currency=currency,
+            check_currency_same=bool(payload.get("check_currency_same", True)),
+            check_granularity_same=bool(payload.get("check_granularity_same", True)),
+            metric_id=metric_id,
+            alias=metric_id,
+        )
+        if not execute:
+            return jsonify({"ok": True, "sql": sql, "currency": currency})
+
+        sql = metric_sql.assert_executable_select(sql)
+        limited = f"SELECT * FROM ({sql}) AS _preview LIMIT 50"
+        columns, rows = [], []
+        with db.get_conn() as conn:
+            cur = conn.execute(limited)
+            columns = [d[0] for d in cur.description]
+            rows = [list(r) for r in cur.fetchall()]
+        return jsonify(
+            {
+                "ok": True,
+                "sql": sql,
+                "currency": currency,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "truncated": len(rows) >= 50,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.route("/metrics/composite/delete/<metric_id>", methods=["POST"])
@@ -266,15 +731,24 @@ def composite_delete(metric_id: str):
     return redirect(url_for("composite_list"))
 
 
+@app.route("/metrics/map")
+def metric_map_view():
+    data = metric_map.build_metric_map()
+    return render_template(
+        "metric_map.html",
+        trees=data["trees"],
+        orphans=data["orphans"],
+        stats=data["stats"],
+    )
+
+
 # ---------- Ask / Demo ----------
 @app.route("/ask", methods=["GET", "POST"])
 def ask():
     derived = db.list_derived(exposed_only=True)
     composites = db.list_composite()
     currencies = db.list_currency_rules()
-    analysis_dims = [
-        d for d in db.list_analysis_dims(enabled_only=True) if d["dim_role"] == "attr"
-    ]
+    analysis_dims = meta.list_ask_analysis_fields()
     result = None
     form = {
         "mode": "form",
