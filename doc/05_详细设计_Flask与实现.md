@@ -226,9 +226,10 @@ askdata/
 ├── metric_sql.py       # 原子/派生 SQL 预览、过滤安全、CASE 包裹
 ├── metric_map.py       # 指标依赖树（复合向下展开）
 ├── engine.py           # 问数规则引擎：Intent → SQL → 执行 → EngineResult
-├── intent.py           # 表单意图 / 关键词伪 NLP
+├── intent.py           # 表单意图 / 百炼或关键词 from_text
+├── intent_llm.py       # 百炼 DashScope OpenAI 兼容 + 白名单校验
 ├── display.py          # 意图与审计的中文展示
-├── requirements.txt    # flask>=3.0.0
+├── requirements.txt    # flask>=3.0.0, openai>=1.0.0
 ├── static/style.css
 ├── templates/          # Jinja2 页面
 ├── data/demo.db        # 运行时生成（勿提交）
@@ -243,7 +244,8 @@ askdata/
 | `biz_arch.py` | `build_tree` / `upsert_node` / `taxonomy_catalog` |
 | `metric_sql.py` | `build_atomic_sql_preview` / `build_derived_sql_preview` / `assert_executable_select` |
 | `engine.py` | `run(Intent)` / `build_composite_sql_preview` |
-| `intent.py` | `from_form` / `from_text` |
+| `intent.py` | `from_form` / `from_text`（auto 百炼或关键词） |
+| `intent_llm.py` | 目录组装、DashScope 调用、`normalize_intent` |
 | `display.py` | `intent_zh` / `audit_zh` / `column_zh` / `dumps_zh` |
 | `metric_map.py` | `build_metric_map()` |
 
@@ -579,7 +581,7 @@ class Intent:
     raw_text: str
 ```
 
-`from_text` 仅为**关键词匹配**（指标名、币种词、电站/区域、项目号正则），可替换为真实 LLM，但输出必须对齐该结构，**禁止模型直接写 SQL**。
+`from_text`：配置了 `DASHSCOPE_API_KEY` 时走百炼（[`intent_llm.py`](../intent_llm.py)），模型只输出 Intent JSON 并经白名单校验；无 Key / 调用失败回退关键词。输出必须对齐 `Intent`，**禁止模型直接写 SQL**。
 
 ### 10.3 引擎主路径（与代码 `engine.run` 对齐）
 
@@ -717,7 +719,7 @@ class EngineResult:
 
 | 目标 | 建议改动点 | 不要做的事 |
 |---|---|---|
-| 接入真实大模型 | 替换 `intent.from_text`，输出仍为 `Intent` | 让模型生成业务 SQL |
+| 接入真实大模型 | 已实现：`intent_llm` + 环境变量；输出仍为 `Intent` | 让模型生成业务 SQL |
 | 接 MaxCompute/数仓 | 替换 `engine._execute` 与连接配置 | 改口径拼装规则绕过元数据 |
 | 拆前后端 | `app.py` 增加 JSON API，复用 `run`/`upsert_*` | 在前端重写汇率逻辑 |
 | 多应用模块化 | 按域拆 Flask Blueprint（meta/metrics/ask） | 在模板里写校验 |

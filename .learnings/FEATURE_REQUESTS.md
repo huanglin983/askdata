@@ -152,3 +152,21 @@ medium
 
 ### Metadata
 **Tags**: biz-arch, metadata, taxonomy
+
+## [FEAT-20260911-006] Bailian DashScope intent for natural language ask
+
+**Logged**: 2026-09-11T11:19:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+**Complexity**: medium
+
+### Requested Capability
+问数页自然语言模式对接阿里云百炼（DashScope OpenAI 兼容接口）；模型只输出 Intent JSON，白名单校验后交 engine.run；无 Key / 失败回退关键词。
+
+### Resolution
+**Resolved**: 2026-09-11
+**Resolution**: Added `intent_llm.py`, refactored `intent.from_text` (auto/bailian/keyword), `.env` + `.env.example`, ask UI provider display. Verified sample query → source=bailian, GAP=1540.
+
+### Metadata
+**Tags**: intent, bailian, dashscope, llm

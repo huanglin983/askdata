@@ -1,11 +1,15 @@
-"""Simple intent parsing: structured form first, keyword NLP fallback."""
+"""Intent parsing: structured form, Bailian LLM, or keyword fallback."""
 from __future__ import annotations
 
+import logging
+import os
 import re
 
 import db
-from engine import Intent
 import meta
+from engine import Intent
+
+logger = logging.getLogger(__name__)
 
 
 def from_form(
@@ -30,13 +34,14 @@ def from_form(
         dims=dims or [],
         filters=filters,
         raw_text=raw_text or "",
+        source="form",
     )
 
 
-def from_text(text: str) -> Intent:
+def from_text_keywords(text: str) -> Intent:
     """Keyword-only 'NLP': match metric names, currency, dims, project id."""
     text = (text or "").strip()
-    intent = Intent(raw_text=text)
+    intent = Intent(raw_text=text, source="keyword")
 
     # currency
     if re.search(r"美元|USD|美金", text, re.I):
@@ -99,13 +104,54 @@ def from_text(text: str) -> Intent:
     )
     for m in stage_pat.finditer(text):
         stage = m.group(1)
-        # normalize FinalCST casing
         for d in derived:
             if d["stage_type"].lower() == stage.lower() and d["id"] not in found_ids:
-                # only total cost derived
                 if "total_cost" in d["id"]:
                     found_ids.append(d["id"])
                     break
 
     intent.metric_ids = found_ids
     return intent
+
+
+def _provider_mode() -> str:
+    """auto | bailian | keyword — from INTENT_PROVIDER env."""
+    try:
+        import intent_llm
+
+        intent_llm.load_dotenv_file()
+    except Exception:  # noqa: BLE001
+        pass
+    return (os.environ.get("INTENT_PROVIDER") or "auto").strip().lower()
+
+
+def from_text(text: str) -> Intent:
+    """Natural language → Intent via Bailian when configured, else keywords."""
+    text = (text or "").strip()
+    mode = _provider_mode()
+
+    use_bailian = False
+    if mode == "keyword":
+        use_bailian = False
+    elif mode == "bailian":
+        use_bailian = True
+    else:  # auto
+        try:
+            import intent_llm
+
+            use_bailian = intent_llm.bailian_configured()
+        except Exception:  # noqa: BLE001
+            use_bailian = False
+
+    if use_bailian:
+        try:
+            import intent_llm
+
+            return intent_llm.from_text_bailian(text)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bailian intent failed, fallback to keyword: %s", e)
+            intent = from_text_keywords(text)
+            # keep source as keyword after fallback; raw_text already set
+            return intent
+
+    return from_text_keywords(text)

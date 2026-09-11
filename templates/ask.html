@@ -3,12 +3,12 @@
 {% block content %}
 <div class="card">
   <h1>问数 Demo</h1>
-  <p class="muted">意图层可用结构化表单（可靠）或关键词文本（模拟 NLP）。规则引擎负责生成 SQL 并在样例库执行。</p>
+  <p class="muted">意图层可用结构化表单，或自然语言（优先阿里云百炼解析 Intent；无 Key / 失败时回退关键词）。规则引擎负责生成 SQL 并在样例库执行。</p>
 
   <form method="post">
     <div class="tabs">
       <label><input type="radio" name="mode" value="form" {% if form.mode=='form' %}checked{% endif %}> 结构化表单</label>
-      <label><input type="radio" name="mode" value="text" {% if form.mode=='text' %}checked{% endif %}> 自然语言（关键词）</label>
+      <label><input type="radio" name="mode" value="text" {% if form.mode=='text' %}checked{% endif %}> 自然语言（百炼 / 回退关键词）</label>
     </div>
 
     <label>自然语言（「自然语言」模式时解析；表单模式可作备注）</label>
@@ -62,7 +62,8 @@
   <h2>① 意图解析</h2>
   <table>
     <tbody>
-      <tr><th style="width:8rem">指标</th><td>{{ intent_view['指标'] | join('、') or '—' }}</td></tr>
+      <tr><th style="width:8rem">意图来源</th><td>{{ intent_view['意图来源'] }}</td></tr>
+      <tr><th>指标</th><td>{{ intent_view['指标'] | join('、') or '—' }}</td></tr>
       <tr><th>币种</th><td>{{ intent_view['币种'] }}</td></tr>
       <tr><th>分析维度</th><td>{{ intent_view['分析维度'] | join('、') or '无' }}</td></tr>
       <tr><th>筛选条件</th>

@@ -23,6 +23,7 @@ class Intent:
     dims: list[str] = field(default_factory=list)  # e.g. power_plant, region
     filters: dict[str, str] = field(default_factory=dict)  # project_number=
     raw_text: str = ""
+    source: str = ""  # form | keyword | bailian — display only, not used in SQL
 
 
 @dataclass
@@ -54,6 +55,7 @@ def run(intent: Intent) -> EngineResult:
         "dims": intent.dims,
         "filters": intent.filters,
         "raw_text": intent.raw_text,
+        "source": intent.source or "",
     }
     if not intent.metric_ids:
         return EngineResult(ok=False, intent=intent_dict, error="未指定指标")

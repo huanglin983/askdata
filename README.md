@@ -23,7 +23,7 @@ Python + Flask + SQLite。语义层元数据驱动，AI/意图层只出结构化
 - 复合：同粒度四则运算（如 `(A+B)/C`）；粒度/币种校验
 - 指标地图：复合向下展开依赖树
 - 规则引擎：阶段汇率绑定、币种注入、粒度/维度校验、JOIN、复合先换算再运算
-- 问数：表单或关键词意图 → SQL → 样例执行 → 中文审计展示
+- 问数：结构化表单，或自然语言（阿里云百炼 Intent → 失败回退关键词）→ SQL → 样例执行 → 中文审计
 
 ## 启动
 
@@ -32,6 +32,7 @@ python -m venv .venv
 
 # Windows
 .\.venv\Scripts\pip install -r requirements.txt
+# 配置百炼（可选）：复制 .env.example 为 .env，填写 DASHSCOPE_API_KEY / BASE_URL
 .\.venv\Scripts\python app.py
 
 # macOS / Linux
@@ -43,20 +44,31 @@ python -m venv .venv
 
 首次启动自动建库灌种（`data/demo.db`，已 gitignore）。
 
+### 百炼意图（自然语言模式）
+
+| 环境变量 | 说明 |
+|---|---|
+| `DASHSCOPE_API_KEY` | 百炼 API Key（未配置则只用关键词） |
+| `DASHSCOPE_BASE_URL` | OpenAI 兼容地址，如 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` |
+| `DASHSCOPE_MODEL` | 默认 `qwen-plus` |
+| `INTENT_PROVIDER` | `auto`（默认）/ `bailian` / `keyword` |
+
+密钥放在本地 `.env`（已 gitignore），勿提交仓库。模型只输出 Intent JSON，SQL 仍由规则引擎生成。
+
 ## 推荐演示
 
-1. **问数 Demo** → 指标「成本GAP」、币种 CNY、维度「电站」、项目 `P001`
-2. 核对 SQL：各阶段先乘本阶段汇率再相减
-3. 期望：Contract 8640 − PJ 7100 = **GAP 1540**（详见 [doc/02](doc/02_计算与币种规则.md)）
+1. **问数 Demo** → 选「自然语言」→ 问句如「查询项目P001的成本GAP，人民币，带电站」
+2. 意图来源应显示「阿里云百炼」（已配 Key）或「关键词」
+3. 核对 SQL：各阶段先乘本阶段汇率再相减；期望 GAP **1540**（详见 [doc/02](doc/02_计算与币种规则.md)）
 
 ## 目录
 
 ```text
-app.py / db.py / engine.py / intent.py / display.py
+app.py / db.py / engine.py / intent.py / intent_llm.py / display.py
 meta.py / biz_arch.py / metric_sql.py / metric_map.py
-templates/  static/  data/  doc/  requirements.txt
+templates/  static/  data/  doc/  requirements.txt  .env.example
 ```
 
 ## 边界
 
-不接真实大模型与生产仓；公式为子指标名 + 四则运算；无登录权限。扩展方式见 [doc/04](doc/04_Demo实现与拆库说明.md)。
+不接生产数仓；公式为子指标名 + 四则运算；无登录权限。扩展方式见 [doc/04](doc/04_Demo实现与拆库说明.md)。

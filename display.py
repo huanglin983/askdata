@@ -13,6 +13,12 @@ CURRENCY_CN = {
     "ORIGIN": "原币(ORIGIN)",
 }
 
+SOURCE_CN = {
+    "form": "结构化表单",
+    "keyword": "关键词",
+    "bailian": "阿里云百炼",
+}
+
 TYPE_CN = {
     "derived": "派生指标",
     "composite": "复合指标",
@@ -42,7 +48,9 @@ def intent_zh(intent: dict[str, Any] | None) -> dict[str, Any]:
     filters_zh = {}
     for k, v in filters.items():
         filters_zh[_dim_name(k) if k != "project_number" else "项目编号"] = v
+    src = intent.get("source") or ""
     return {
+        "意图来源": SOURCE_CN.get(src, src or "—"),
         "指标": [_metric_name(m) for m in intent.get("metric_ids") or []],
         "币种": CURRENCY_CN.get(intent.get("currency", ""), intent.get("currency")),
         "分析维度": [_dim_name(c) for c in intent.get("dims") or []],
