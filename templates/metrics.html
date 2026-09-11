@@ -65,5 +65,58 @@
       </div>
     </a>
   </div>
+
+  <section class="metric-pipeline" aria-labelledby="metric-pipeline-title">
+    <div class="metric-pipeline-hd">
+      <h2 id="metric-pipeline-title">规则引擎：解析与替换</h2>
+      <p class="muted">复合公式中的指标名 → 查元数据 → 递归展开 → 替换为 SQL 表达式</p>
+    </div>
+
+    <ol class="metric-pipeline-steps">
+      <li class="metric-pipeline-step step-rule">
+        <span class="metric-pipeline-num">1</span>
+        <strong>规则</strong>
+        <span>公式 + 币种</span>
+      </li>
+      <li class="metric-pipeline-arrow" aria-hidden="true">→</li>
+      <li class="metric-pipeline-step step-id">
+        <span class="metric-pipeline-num">2</span>
+        <strong>识别</strong>
+        <span>抽出指标名</span>
+      </li>
+      <li class="metric-pipeline-arrow" aria-hidden="true">→</li>
+      <li class="metric-pipeline-step step-meta">
+        <span class="metric-pipeline-num">3</span>
+        <strong>元数据</strong>
+        <span>查指标目录</span>
+      </li>
+      <li class="metric-pipeline-arrow" aria-hidden="true">→</li>
+      <li class="metric-pipeline-step step-resolve">
+        <span class="metric-pipeline-num">4</span>
+        <strong>递归</strong>
+        <span>原子 / 派生 / 复合</span>
+      </li>
+      <li class="metric-pipeline-arrow" aria-hidden="true">→</li>
+      <li class="metric-pipeline-step step-replace">
+        <span class="metric-pipeline-num">5</span>
+        <strong>替换</strong>
+        <span>名 → SQL 表达式</span>
+      </li>
+    </ol>
+
+    <div class="metric-pipeline-example">
+      <div class="metric-pipeline-ex-col">
+        <span class="metric-pipeline-ex-label">输入</span>
+        <code>成本GAP / Contract总成本</code>
+        <span class="muted">币种 CNY</span>
+      </div>
+      <div class="metric-pipeline-ex-arrow" aria-hidden="true">⇒</div>
+      <div class="metric-pipeline-ex-col">
+        <span class="metric-pipeline-ex-label">替换后</span>
+        <code>(COALESCE(contract…)*rate − COALESCE(pj…)*rate) / (COALESCE(contract…)*rate)</code>
+      </div>
+    </div>
+    <p class="metric-pipeline-note muted">子指标先各自换算币种，再做四则运算；禁止整式外包一层汇率。</p>
+  </section>
 </div>
 {% endblock %}
