@@ -288,6 +288,10 @@ flowchart BT
   app --> biz_arch
   app --> metric_sql
   app --> metric_map
+  intent --> intent_chatbi
+  intent --> intent_llm
+  intent_chatbi --> chatbi
+  intent_chatbi --> intent_llm
   intent --> engine
   intent --> db
   intent --> meta
@@ -873,12 +877,28 @@ class EngineResult:
     error: str = ""
 ```
 
-### 13.2 审计节点（示意）
+### 13.2 `Intent`（引擎入参，见 §10.4）
+
+除 `metric_ids/currency/dims/filters/raw_text` 外，自然语言链路还会填充：
+
+| 字段 | 说明 |
+|---|---|
+| `source` | `form` / `keyword` / `bailian` / `chatbi` |
+| `intent_type` | 数据查询 / 指标口径咨询 / 指标字典检索 |
+| `include_related` / `related_metric_ids` | 关联血缘 |
+| `payload_zh` | 中文 Intent JSON，供 UI 原样展示 |
+| `disambiguate_msg` | 多指标消歧 |
+| `capability_help_msg` | 未识别意图时的三类能力引导 |
+
+ChatBI 中间态另见 `chatbi.schemas.IntentStruct` / `SchemaMapInfo` / `VerifyResult`。
+
+### 13.3 审计节点（示意）
 
 派生示例字段：`type/name/stage_type/amount_col/rate_col/expr/grain/...`  
-复合示例字段：`formula/expanded_expr/children/note`（note 固定提示「先各阶段独立换算，再四则运算」）
+复合示例字段：`formula/expanded_expr/children/note`（note 固定提示「先各阶段独立换算，再四则运算」）  
+口径咨询：同结构但 `note` 标明「口径咨询（不执行数值查询）」，`sql` 为空。
 
-### 13.3 指标地图返回
+### 13.4 指标地图返回
 
 `metric_map.build_metric_map()` → `{ trees, orphans, stats }`：
 
@@ -892,9 +912,12 @@ class EngineResult:
 
 | 目标 | 建议改动点 | 不要做的事 |
 |---|---|---|
-| 接入真实大模型 | 已实现：`intent_llm` + 环境变量；输出仍为 `Intent` | 让模型生成业务 SQL |
+| 接入真实大模型 | 已实现：ChatBI + `BailianChatClient` / `intent_llm`；输出仍为 `Intent` | 让模型生成业务 SQL |
+| 接入向量召回 | 实现 `EmbeddingMapper.match`（embedding + ANN） | 绕过白名单模糊编造指标名 |
+| 指标血缘服务 | 注入 `ChatBIWorkflow(lineage_fn=...)` 或扩展 `lineage_related_ids` | 在 LLM 侧展开全库指标 |
+| 会话持久化 | 将 `ChatMemory` 换为 Redis | 在无 session 时跨用户串记忆 |
 | 接 MaxCompute/数仓 | 替换 `engine._execute` 与连接配置 | 改口径拼装规则绕过元数据 |
-| 拆前后端 | `app.py` 增加 JSON API，复用 `run`/`upsert_*` | 在前端重写汇率逻辑 |
+| 拆前后端 | `app.py` 增加 JSON API，复用 `run`/`from_text`/`upsert_*` | 在前端重写汇率逻辑 |
 | 多应用模块化 | 按域拆 Flask Blueprint（meta/metrics/ask） | 在模板里写校验 |
 | 权限 | 加登录中间件保护写路由与 `/admin/reset` | 暴露强制重建给公网 |
 | 配置与事实分库 | `db.get_conn` 与执行连接分离 | 引擎写临时业务表充当口径 |
@@ -903,11 +926,16 @@ class EngineResult:
 
 1. 启动后打开 `http://127.0.0.1:5050`
 2. 指标管理三类列表可打开；编辑保存有 flash
-3. 问数：成本 GAP + CNY + 电站 + `P001` → GAP **1540**（见 [02](02_计算与币种规则.md)）
-4. 审计中可见各阶段金额列与对应汇率列，且先换算再相减
+3. 问数表单：成本 GAP + CNY + 电站 + `P001` → GAP **1540**（见 [02](02_计算与币种规则.md)）
+4. 自然语言：选「自然语言（ChatBI / 回退）」  
+   - 「…成本GAP以及其他相关…」→ 意图来源 ChatBI，生成 SQL  
+   - 「成本GAP指标口径是什么？」→ 口径元数据，无业务 SQL  
+   - 「成本GAP和PJ成本金额」→ 消歧提示  
+   - 「今天天气怎么样」→ 三类能力引导  
+5. 审计中可见各阶段金额列与对应汇率列，且先换算再相减
+6. 可选：`python -m chatbi.main --batch` 无 Key 跑通意图流水线
 
 ---
-
 ## 15. 附录：路由速查表
 
 | 方法 | 路径 | 视图函数 | 说明 |

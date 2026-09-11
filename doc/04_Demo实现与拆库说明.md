@@ -12,7 +12,7 @@
 | 原子/派生 SQL 预览与过滤安全 | `metric_sql.py` |
 | 规则引擎（汇率、币种、复合、校验、JOIN） | `engine.py` |
 | 指标依赖地图数据 | `metric_map.py` |
-| 意图解析（表单 + 百炼 / 关键词） | `intent.py` / `intent_llm.py` |
+| 意图解析（表单 + ChatBI 流水线 / 百炼 / 关键词） | `intent.py` / `intent_chatbi.py` / `intent_llm.py` / `chatbi/` |
 | 中文展示（意图/审计/列名） | `display.py` |
 | Web 管理与问数 | `app.py` + `templates/` + `static/style.css` |
 | 方案与计算文档 | `doc/` |
@@ -26,7 +26,7 @@
 | 指标地图 | `/metrics/map` | 复合向下展开依赖树；孤立指标单独列出 |
 | 业务架构 | `/meta/biz-arch` | 四级分类树维护 |
 | 元数据 / 维度关系 | `/meta/tables`、`/meta/rels` | 表字段与 JOIN |
-| 问数 Demo | `/ask` | 表单或自然语言（百炼 Intent，失败回退关键词）→ 引擎执行 |
+| 问数 Demo | `/ask` | 表单或自然语言（ChatBI 主链路：Mapper+LLM/规则+校验消歧；失败回退百炼/关键词）→ 引擎执行或口径/字典 |
 
 顶栏**不再**并列「原子指标 / 派生指标 / 复合指标」三个入口，统一为「指标管理」。
 
@@ -97,18 +97,22 @@ python -m venv .venv
 
 ## 5. 明确不在 Demo / 首版库内的范围
 
-- 真实大模型 API（**已支持**：自然语言模式经 `intent_llm` 调百炼；无 Key 回退关键词）
+- 向量召回 ANN（`EmbeddingMapper` 仅占位）
+- 外部指标血缘服务（ChatBI `_get_metric_lineage` 占位；现网血缘仍走 `intent_llm.lineage_related_ids`）
 - MaxCompute / 生产数仓直连（替换执行层即可）
 - 登录权限、审批流、Excel 批量导入
 - 通用公式 AST（当前为子指标名 + 四则运算）
 - 独立的「分析维度」CRUD 页（已并入表字段 `is_analysis_dim`）
+
+> 自然语言意图：**已支持** ChatBI 流水线（词典 Mapper + 百炼/规则兜底 + 校验消歧）；无 Key 走规则兜底；ChatBI 失败可回退旧百炼/关键词。细节见 [05 §10](05_详细设计_Flask与实现.md)。
 
 ## 6. 扩展建议（拆库后）
 
 | 方向 | 建议 |
 |---|---|
 | 生产执行 | `engine._execute` 改为 JDBC/ODPS 客户端，SQL 方言保持引擎生成 |
-| 真 NLP | 意图输出对齐 `Intent` 数据结构，勿让模型写 SQL |
+| 真 NLP | 继续扩展 `chatbi/`；输出对齐 `Intent` / `IntentStruct`，勿让模型写 SQL |
+| 向量召回 | 实现 `EmbeddingMapper` + 白名单校验，禁止模糊编造指标名 |
 | 配置同步 | 从指标平台 API/Excel 导入到 `metric_*` 表 |
 | 多事实表 | 扩展 `source_table` 路由与 `meta_table_rel` |
 
