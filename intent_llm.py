@@ -19,6 +19,28 @@ logger = logging.getLogger(__name__)
 INTENT_TYPES = frozenset({"数据查询", "指标口径咨询", "指标字典检索"})
 _ALLOWED_CURRENCIES = frozenset({"CNY", "USD", "ORIGIN"})
 
+CAPABILITY_HELP = (
+    "暂未识别到明确意图。我目前可以帮你：\n"
+    "1. 数据查询：查指标数值（生成并执行 SQL）\n"
+    "2. 指标口径咨询：问定义/公式/口径，返回指标元数据\n"
+    "3. 指标字典检索：查有哪些指标/清单"
+)
+
+SUPPORTED_CAPABILITIES = [
+    {
+        "type": "数据查询",
+        "desc": "查指标数值，走规则引擎生成/执行 SQL",
+    },
+    {
+        "type": "指标口径咨询",
+        "desc": "问定义/公式/口径，返回指标元数据（不查数）",
+    },
+    {
+        "type": "指标字典检索",
+        "desc": "查有哪些指标/清单，返回字典列表",
+    },
+]
+
 # Display currency labels ↔ engine codes
 _CURRENCY_LABEL_TO_CODE = {
     "人民币(CNY)": "CNY",
@@ -635,6 +657,27 @@ def intent_to_engine_dict(intent: Intent) -> dict[str, Any]:
     return base
 
 
+def needs_capability_help(intent: Intent) -> bool:
+    """自然语言未落入可执行意图时，应返回能力引导而非强行跑 SQL。"""
+    if getattr(intent, "capability_help_msg", None):
+        return True
+    if intent.intent_type not in INTENT_TYPES:
+        return True
+    if intent.intent_type == "数据查询" and not intent.metric_ids and not intent.metric_names:
+        return True
+    return False
+
+
+def capability_help_result(intent: Intent) -> EngineResult:
+    """未识别意图时的统一反馈。"""
+    msg = getattr(intent, "capability_help_msg", None) or CAPABILITY_HELP
+    intent_dict = intent_to_engine_dict(intent)
+    payload = dict(intent_dict.get("payload_zh") or {})
+    payload.setdefault("能力清单", [c["type"] for c in SUPPORTED_CAPABILITIES])
+    intent_dict["payload_zh"] = payload
+    return EngineResult(ok=False, intent=intent_dict, error=msg)
+
+
 def handle_non_query(intent: Intent) -> EngineResult | None:
     """Return EngineResult for 口径咨询 / 字典检索; None if should run SQL."""
     if intent.intent_type == "数据查询":
@@ -729,4 +772,5 @@ def handle_non_query(intent: Intent) -> EngineResult | None:
             rows=[],
         )
 
-    return None
+    # 未覆盖的意图类型：能力引导，不落 SQL
+    return capability_help_result(intent)

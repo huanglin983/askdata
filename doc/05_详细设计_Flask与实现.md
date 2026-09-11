@@ -18,6 +18,12 @@
 8. [数据层设计（SQLite）](#8-数据层设计sqlite)
 9. [配置管理链路（CRUD）](#9-配置管理链路crud)
 10. [问数链路详细设计](#10-问数链路详细设计)
+    - 10.1 端到端流程
+    - 10.2 意图类型与路由分发
+    - 10.3 ChatBI 意图识别流水线（自然语言主链路）
+    - 10.4 Intent / IntentStruct 与历史 JSON 兼容
+    - 10.5 消歧、能力引导与非查询处理
+    - 10.6 引擎主路径与结果展示
 11. [规则引擎内部设计](#11-规则引擎内部设计)
 12. [SQL 预览与安全边界](#12-sql-预览与安全边界)
 13. [关键数据结构](#13-关键数据结构)
@@ -34,6 +40,7 @@
 | 要改页面 / 加菜单 | §6、§7、附录 |
 | 要改指标配置逻辑 | §8、§9 |
 | 要改问数 / SQL 生成 | §10、§11、§12 |
+| 要改自然语言意图 / ChatBI | §10.2～§10.5、`chatbi/`、`intent_chatbi.py` |
 | 业务口径 / 汇率规则 | [01](01_技术方案.md)、[02](02_计算与币种规则.md) |
 | 表字段含义 | [03](03_元数据与配置模型.md) |
 | 拆库 / 启动 | [04](04_Demo实现与拆库说明.md) |
@@ -168,6 +175,9 @@ flowchart TB
   end
   subgraph intentL [意图层]
     I[intent.py]
+    IC[intent_chatbi.py]
+    IL[intent_llm.py]
+    CB[chatbi 流水线]
   end
   subgraph semantic [语义配置层]
     BA[biz_arch.py]
@@ -187,6 +197,10 @@ flowchart TB
   T <--> A
   A --> BA & M & D & MS & MM
   A --> I
+  I --> IC
+  IC --> CB
+  IC --> IL
+  I --> IL
   I --> E
   A --> E
   E --> D & M & MS
@@ -199,7 +213,7 @@ flowchart TB
 | 层 | 职责 | 禁止事项 |
 |---|---|---|
 | 表现层 | URL、表单、页面、flash | 不写业务口径 SQL |
-| 意图层 | 文本/表单 → `Intent` | 不生成业务 SQL |
+| 意图层 | 文本/表单 → `Intent`；ChatBI 抽取/校验/消歧/会话 | **不生成业务 SQL、不查数仓** |
 | 语义配置层 | 元数据 CRUD、预览 SQL 拼装 | 不问数执行的完整 JOIN/审计 |
 | 规则引擎 | 校验、币种、JOIN、执行、审计 | 不解析自然语言 |
 | 数据层 | 持久化与样例事实数据 | — |
@@ -209,7 +223,7 @@ flowchart TB
 | 能力 | 入口 | 说明 |
 |---|---|---|
 | **配置中心** | 业务架构 / 元数据 / 维度关系 / 指标管理 / 指标地图 | 维护语义层，供引擎读取 |
-| **问数 Demo** | `/ask` | 结构化意图 → SQL → 结果 + 中文审计 |
+| **问数 Demo** | `/ask` | 结构化表单或自然语言（ChatBI）→ 意图路由 → SQL/元数据/字典 + 中文审计 |
 
 架构原则（与 [01](01_技术方案.md) 一致）：**AI/意图只出结构；口径与 SQL 由元数据 + 规则引擎生成。**
 
@@ -226,10 +240,21 @@ askdata/
 ├── metric_sql.py       # 原子/派生 SQL 预览、过滤安全、CASE 包裹
 ├── metric_map.py       # 指标依赖树（复合向下展开）
 ├── engine.py           # 问数规则引擎：Intent → SQL → 执行 → EngineResult
-├── intent.py           # 表单意图 / 百炼或关键词 from_text
-├── intent_llm.py       # 百炼 DashScope OpenAI 兼容 + 白名单校验
+├── intent.py           # 表单意图 / 自然语言 from_text（ChatBI 主链路）
+├── intent_chatbi.py    # ChatBI → engine.Intent 适配；会话与能力引导
+├── intent_llm.py       # 百炼调用、目录白名单、normalize、非查询/能力帮助
 ├── display.py          # 意图与审计的中文展示
-├── requirements.txt    # flask>=3.0.0, openai>=1.0.0
+├── chatbi/             # 企业级意图流水线（对标 Supersonic 思想）
+│   ├── chat_workflow.py      # 编排：预处理→Mapper→解析→校验→记忆→路由
+│   ├── semantic_parser.py    # LLM 解析 + Rule 兜底
+│   ├── semantic_corrector.py # 指标/维度白名单、多指标消歧
+│   ├── chat_memory.py        # 会话记忆（内存；可换 Redis）
+│   ├── schemas.py            # IntentStruct / SchemaMapInfo / VerifyResult
+│   ├── config.py             # Prompt 与本地字典占位
+│   ├── llm_clients.py        # 百炼适配 / 强制规则 Client
+│   ├── main.py               # 本地 Mock 测试入口
+│   └── entity_mapper/        # 词典 Mapper + Embedding 占位
+├── requirements.txt    # flask / openai / pydantic
 ├── static/style.css
 ├── templates/          # Jinja2 页面
 ├── data/demo.db        # 运行时生成（勿提交）
@@ -244,8 +269,10 @@ askdata/
 | `biz_arch.py` | `build_tree` / `upsert_node` / `taxonomy_catalog` |
 | `metric_sql.py` | `build_atomic_sql_preview` / `build_derived_sql_preview` / `assert_executable_select` |
 | `engine.py` | `run(Intent)` / `build_composite_sql_preview` |
-| `intent.py` | `from_form` / `from_text`（auto 百炼或关键词） |
-| `intent_llm.py` | 目录组装、DashScope 调用、`normalize_intent` |
+| `intent.py` | `from_form` / `from_text`（默认 ChatBI，失败回退百炼/关键词） |
+| `intent_chatbi.py` | `from_text_chatbi`：跑流水线并映射为 `Intent` |
+| `intent_llm.py` | 目录组装、DashScope、`normalize_llm_payload`、`handle_non_query`、能力引导 |
+| `chatbi/*` | Schema 实体匹配、语义抽取、校验消歧、会话、路由（不含 SQL） |
 | `display.py` | `intent_zh` / `audit_zh` / `column_zh` / `dumps_zh` |
 | `metric_map.py` | `build_metric_map()` |
 
@@ -561,29 +588,175 @@ flowchart TD
   A[用户打开 /ask] --> B{提交方式}
   B -->|表单 mode=form| C[intent.from_form]
   B -->|文本 mode=text| D[intent.from_text]
-  C --> E[engine.run Intent]
-  D --> E
+  D --> D1[ChatBI 主链路 intent_chatbi]
+  D1 -->|失败| D2[旧百炼 / 关键词回退]
+  D1 --> E0{交互分支}
+  D2 --> E0
+  E0 -->|多指标消歧| G1[EngineResult 需要消歧 不跑SQL]
+  E0 -->|未识别意图| G2[EngineResult 能力引导 不跑SQL]
+  E0 -->|口径/字典| NQ[intent_llm.handle_non_query]
+  E0 -->|数据查询| E[engine.run Intent]
+  C --> E
+  NQ --> H[display 中文化]
   E --> F{ok?}
   F -->|否| G[页面展示 error]
-  F -->|是| H[display 中文化]
-  H --> I[展示 SQL / 审计 / 结果表]
+  F -->|是| H
+  H --> I[展示 SQL或说明 / 审计 / 结果表]
+  G1 --> I
+  G2 --> I
 ```
 
-### 10.2 Intent 结构（意图层唯一输出）
+自然语言模式使用 Flask `session["ask_session_id"]` 作为 ChatBI 会话键，支撑多轮记忆（当前改写逻辑为占位，记忆已落库到进程内 `ChatMemory`）。
+
+### 10.2 意图类型与路由分发
+
+系统正式支持 **3 种**意图类型（`INTENT_TYPES` / `IntentStruct.意图类型` 白名单）：
+
+| 意图类型 | 用户诉求 | 下游动作 | SQL？ |
+|---|---|---|---|
+| **数据查询** | 看指标数值、报表 | `engine.run` → 规则引擎拼 SQL 并执行 | 是 |
+| **指标口径咨询** | 问定义/公式/口径/含义 | `handle_non_query` → 返回指标元数据审计 | 否 |
+| **指标字典检索** | 有哪些指标/清单 | `handle_non_query` → 字典列表行 | 否 |
+
+ChatBI 内部路由（`chatbi.chat_workflow.ChatBIWorkflow._route`）仅做分发，**不拼 SQL**：
+
+| `route.action` | 含义 |
+|---|---|
+| `query_data` | 数据查询；可带 `metrics/dimensions/filter/currency/calc_cmd` |
+| `query_metric_meta` | 口径咨询 |
+| `list_metric` | 字典检索 |
+| `unknown` | 未覆盖类型 → 能力引导（见 §10.5） |
+
+`是否查询关联指标=true` 时：ChatBI 侧 `_get_metric_lineage` 为占位；真正血缘展开在 `intent_llm.normalize_llm_payload` / `lineage_related_ids`，把可查询关联指标并入 `metric_ids` 后交给引擎。
+
+### 10.3 ChatBI 意图识别流水线（自然语言主链路）
+
+设计对齐 Supersonic 思路：**用户问句 → 预处理 → Schema 实体 Mapper → LLM 语义抽取 → 元数据校验 → 会话记忆 → 意图路由**。边界明确：**只做意图，不做 SQL / 库查询**。
+
+```mermaid
+flowchart LR
+  Q[原始问句] --> P[预处理/多轮改写占位]
+  P --> M1[DictMapper 词典]
+  M1 --> M2[EmbeddingMapper 占位]
+  M2 --> S[SchemaMapInfo]
+  S --> L{LLMSemanticParser}
+  L -->|成功| I[IntentStruct]
+  L -->|异常| R[RuleSemanticParser 规则兜底]
+  R --> I
+  I --> C[SemanticCorrector]
+  C -->|多指标| DA[code=disambiguate]
+  C -->|通过| MEM[ChatMemory.save]
+  MEM --> RT[_route 分发]
+  RT -->|unknown| UN[code=unknown + capabilities]
+  RT -->|成功| OK[code=success + route]
+```
+
+#### 10.3.1 模块职责
+
+| 模块 | 职责 |
+|---|---|
+| `chatbi/chat_workflow.py` | 流水线编排；注入指标/维度字典与 system prompt |
+| `entity_mapper/dict_mapper.py` | 指标/维度子串匹配、币种、阶段、项目编号 |
+| `entity_mapper/embedding_mapper.py` | **向量召回占位**，本次不实现 ANN |
+| `semantic_parser.py` | LLM JSON 抽取；失败降级规则（口径/字典/关联/TopN 关键词） |
+| `semantic_corrector.py` | 指标白名单、维度合法性；多指标 → 消歧反问 |
+| `chat_memory.py` | 按 `session_id` 内存保存最近 `IntentStruct`（可换 Redis） |
+| `llm_clients.py` | `BailianChatClient` / `ForceRuleLLMClient` |
+| `intent_chatbi.py` | 拉平台 catalog、跑 workflow、映射为 `engine.Intent` |
+| `intent.py` | `from_text` 入口：`INTENT_PROVIDER` 控制主链路与回退 |
+
+#### 10.3.2 Provider 与降级
+
+| `INTENT_PROVIDER` | 行为 |
+|---|---|
+| `auto`（默认）/ `chatbi` / `bailian` | **优先 ChatBI**；ChatBI 异常再回退旧百炼（若配置）或关键词 |
+| `keyword` | 仅关键词 `from_text_keywords` |
+
+ChatBI 内部 LLM：
+
+- 已配置 `DASHSCOPE_API_KEY` → `BailianChatClient`（`intent_llm.call_bailian_raw`）
+- 未配置 → `ForceRuleLLMClient` 主动抛错，触发 **RuleSemanticParser** 兜底
+
+日志埋点（`logging`）：原始问句、Mapper 候选、意图输出、校验告警、消歧/unknown、会话保存。
+
+#### 10.3.3 本地单测入口
+
+```bash
+pip install pydantic
+python -m chatbi.main --batch   # 或 cd chatbi && python main.py
+```
+
+`chatbi/main.py` 内置 `MockLLMClient`，无需真实大模型即可跑通整套链路。
+
+### 10.4 Intent / IntentStruct 与历史 JSON 兼容
+
+#### ChatBI 中间结构 `IntentStruct`（Pydantic）
+
+与问数页 `payload_zh` / 历史百炼 JSON 字段对齐：
+
+```text
+意图来源, 意图类型, 指标[], 币种, 分析维度[], 筛选条件{},
+计算指令, 是否查询关联指标, 原始问句
+```
+
+`SchemaMapInfo`：`metric_candidates` / `dim_candidates` / `filter_candidates` / `currency_candidate`。  
+`VerifyResult`：`intent` + `warning_msg` + `need_disambiguate`。
+
+#### 引擎结构 `engine.Intent`（dataclass）
 
 ```python
 @dataclass
 class Intent:
-    metric_ids: list[str]   # 派生或复合（或可解析的原子）ID
-    currency: str           # CNY / USD / ORIGIN
-    dims: list[str]         # 分析维度 code，如 power_plant
-    filters: dict[str, str] # 如 project_number=P001
+    metric_ids: list[str]
+    currency: str                 # CNY / USD / ORIGIN
+    dims: list[str]               # 分析维度 code
+    filters: dict[str, str]
     raw_text: str
+    source: str                   # form | keyword | bailian | chatbi
+    intent_type: str              # 三类之一
+    include_related: bool
+    calc_instruction: str | None
+    metric_names: list[str]
+    related_metric_ids: list[str]
+    payload_zh: dict              # 中文意图回显
+    disambiguate_msg: str | None  # 多指标消歧文案
+    capability_help_msg: str | None  # 未识别时的能力引导
 ```
 
-`from_text`：配置了 `DASHSCOPE_API_KEY` 时走百炼（[`intent_llm.py`](../intent_llm.py)），模型只输出 Intent JSON 并经白名单校验；无 Key / 调用失败回退关键词。输出必须对齐 `Intent`，**禁止模型直接写 SQL**。
+映射路径：`IntentStruct` → `normalize_llm_payload`（名称→ID、币种、维度 code、筛选规范化、血缘展开）→ `Intent`。  
+**禁止模型直接写 SQL**；SQL 仅由 `engine.run` 生成。
 
-### 10.3 引擎主路径（与代码 `engine.run` 对齐）
+### 10.5 消歧、能力引导与非查询处理
+
+`/ask` POST（`mode=text`）在调用引擎前统一拦截：
+
+```mermaid
+flowchart TD
+  P[parsed Intent] --> D{disambiguate_msg?}
+  D -->|是| E1[ok=False 需要消歧：…]
+  D -->|否| H{needs_capability_help?}
+  H -->|是| E2[ok=False CAPABILITY_HELP]
+  H -->|否| N{intent_type}
+  N -->|口径咨询| M[返回 audit 元数据]
+  N -->|字典检索| L[返回字典 rows]
+  N -->|数据查询| R[engine.run]
+```
+
+**多指标消歧**：`SemanticCorrector` 在白名单内命中 `>1` 个指标 → `need_disambiguate`；页面错误框提示「请问您需要查询哪一项？」，**不执行 SQL**。
+
+**能力引导**（`intent_llm.CAPABILITY_HELP`）触发条件：
+
+1. ChatBI `route.action == unknown` / `code == unknown`
+2. `intent_type` 不在三类白名单
+3. **数据查询但指标为空**（如闲聊、指标名不在字典）
+
+文案固定告知可支持的三类能力（数据查询 / 口径咨询 / 字典检索）。
+
+**口径咨询元数据**：`handle_non_query` 按复合/派生/原子组装 `audit`（公式、阶段、金额/汇率字段等），`sql=""`，页面展示「不生成业务 SQL」。
+
+### 10.6 引擎主路径与结果展示
+
+#### 引擎主路径（与代码 `engine.run` 对齐）
 
 ```mermaid
 flowchart TD
@@ -602,19 +775,19 @@ flowchart TD
 
 失败时返回 `EngineResult(ok=False, error=...)`，**不执行**或中止拼装，保证「错口径不出数」。
 
-### 10.4 结果展示
+#### 结果展示
 
 | 字段 | 含义 |
 |---|---|
-| `sql` | 最终可执行 SELECT |
-| `audit` | 每指标解析树：阶段、金额/汇率列、过滤、展开公式等 |
-| `columns` / `rows` | 查询结果 |
-| `intent` | 结构化意图回显 |
+| `sql` | 最终可执行 SELECT（口径/字典/消歧/能力引导时为空） |
+| `audit` | 每指标解析树或口径元数据 |
+| `columns` / `rows` | 查询结果或字典行 |
+| `intent` / `payload_zh` | 结构化意图回显（含意图来源如「ChatBI意图流水线」） |
+| `error` | 消歧文案、能力引导、引擎错误等 |
 
-`display.py` 把上述结构转成中文标签，供 `ask.html` 展示，满足可审计要求。
+`display.py` 把上述结构转成中文标签，供 `ask.html` 展示；`source=chatbi` 映射为「ChatBI意图流水线」。
 
 ---
-
 ## 11. 规则引擎内部设计
 
 ### 11.1 指标解析递归

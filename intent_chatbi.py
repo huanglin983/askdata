@@ -93,6 +93,27 @@ def from_text_chatbi(text: str, *, session_id: str | None = None) -> Intent:
         intent.payload_zh["意图来源"] = _source_label(raw)
         if out.get("warning"):
             intent.payload_zh["校验告警"] = out["warning"]
+
+    route = out.get("route") or {}
+    if out.get("code") == "unknown" or route.get("action") == "unknown":
+        intent.capability_help_msg = intent_llm.CAPABILITY_HELP
+        if intent.payload_zh is not None:
+            caps = route.get("capabilities") or intent_llm.SUPPORTED_CAPABILITIES
+            intent.payload_zh["能力清单"] = [
+                c.get("type") if isinstance(c, dict) else c for c in caps
+            ]
+        logger.info("chatbi unknown intent → capability help, query=%s", text)
+        return intent
+
+    # 数据查询但无有效指标：引导三类能力，避免直接抛「未指定指标」
+    if intent.intent_type == "数据查询" and not intent.metric_ids and not intent.metric_names:
+        intent.capability_help_msg = intent_llm.CAPABILITY_HELP
+        if intent.payload_zh is not None:
+            intent.payload_zh["能力清单"] = [
+                c["type"] for c in intent_llm.SUPPORTED_CAPABILITIES
+            ]
+        logger.info("chatbi empty metrics → capability help, query=%s", text)
+
     return intent
 
 

@@ -31,6 +31,7 @@ class Intent:
     related_metric_ids: list[str] = field(default_factory=list)
     payload_zh: dict[str, Any] = field(default_factory=dict)
     disambiguate_msg: str | None = None  # ChatBI 多指标消歧反问
+    capability_help_msg: str | None = None  # 未识别意图时的能力引导
 
 
 @dataclass

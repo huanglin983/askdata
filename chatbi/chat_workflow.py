@@ -107,6 +107,20 @@ class ChatBIWorkflow:
 
         # Step6 路由分发（不下钻 SQL）
         route_result = self._route(intent)
+        if route_result.get("action") == "unknown":
+            logger.warning(
+                "ChatBI unknown intent session_id=%s intent=%s",
+                session_id,
+                intent.model_dump(),
+            )
+            return {
+                "code": "unknown",
+                "msg": "暂未识别到明确意图",
+                "intent": intent.model_dump(),
+                "route": route_result,
+                "warning": verify_result.warning_msg,
+            }
+
         result = {
             "code": "success",
             "intent": intent.model_dump(),
@@ -157,7 +171,23 @@ class ChatBIWorkflow:
             }
         if intent.意图类型 == "指标字典检索":
             return {"action": "list_metric"}
-        return {"action": "unknown"}
+        return {
+            "action": "unknown",
+            "capabilities": [
+                {
+                    "type": "数据查询",
+                    "desc": "查指标数值，走规则引擎生成/执行 SQL",
+                },
+                {
+                    "type": "指标口径咨询",
+                    "desc": "问定义/公式/口径，返回指标元数据（不查数）",
+                },
+                {
+                    "type": "指标字典检索",
+                    "desc": "查有哪些指标/清单，返回字典列表",
+                },
+            ],
+        }
 
     def _get_metric_lineage(self, metric_list: list[str]) -> list[str]:
         """指标血缘接口：可注入外部服务；默认占位。"""

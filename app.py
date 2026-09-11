@@ -777,13 +777,22 @@ def ask():
             parsed = intent_mod.from_text(
                 form["text"], session_id=session["ask_session_id"]
             )
-            # ChatBI 多指标消歧：提示反问，不执行 SQL
-            if getattr(parsed, "disambiguate_msg", None):
-                try:
-                    import intent_llm
+            # ChatBI 多指标消歧 / 未识别意图能力引导：提示后不执行 SQL
+            try:
+                import intent_llm
 
-                    intent_dict = intent_llm.intent_to_engine_dict(parsed)
-                except Exception:  # noqa: BLE001
+                intent_dict_fn = intent_llm.intent_to_engine_dict
+                needs_help = intent_llm.needs_capability_help
+                help_result = intent_llm.capability_help_result
+            except Exception:  # noqa: BLE001
+                intent_dict_fn = None
+                needs_help = None
+                help_result = None
+
+            if getattr(parsed, "disambiguate_msg", None):
+                if intent_dict_fn is not None:
+                    intent_dict = intent_dict_fn(parsed)
+                else:
                     intent_dict = {
                         "metric_ids": parsed.metric_ids,
                         "currency": parsed.currency,
@@ -803,6 +812,8 @@ def ask():
                     intent=intent_dict,
                     error=f"需要消歧：{parsed.disambiguate_msg}",
                 )
+            elif needs_help is not None and needs_help(parsed):
+                result = help_result(parsed)
             else:
                 result = None
         else:
