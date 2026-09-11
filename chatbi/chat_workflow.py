@@ -102,17 +102,18 @@ class ChatBIWorkflow:
                 "intent": intent.model_dump(),
             }
 
-        # Step5 保存会话
-        self.memory.save(session_id, intent)
-
-        # Step6 路由分发（不下钻 SQL）
+        # Step5 路由分发（不下钻 SQL）；未识别不写入会话记忆
         route_result = self._route(intent)
-        if route_result.get("action") == "unknown":
+        if route_result.get("action") == "unknown" or intent.意图类型 == "未识别":
             logger.warning(
                 "ChatBI unknown intent session_id=%s intent=%s",
                 session_id,
                 intent.model_dump(),
             )
+            if route_result.get("action") != "unknown":
+                route_result = self._route(
+                    intent.model_copy(update={"意图类型": "未识别"})
+                )
             return {
                 "code": "unknown",
                 "msg": "暂未识别到明确意图",
@@ -120,6 +121,9 @@ class ChatBIWorkflow:
                 "route": route_result,
                 "warning": verify_result.warning_msg,
             }
+
+        # Step6 保存会话（仅可执行意图）
+        self.memory.save(session_id, intent)
 
         result = {
             "code": "success",
@@ -171,6 +175,7 @@ class ChatBIWorkflow:
             }
         if intent.意图类型 == "指标字典检索":
             return {"action": "list_metric"}
+        # 未识别及其它
         return {
             "action": "unknown",
             "capabilities": [

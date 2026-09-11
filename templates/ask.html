@@ -64,6 +64,9 @@
     <tbody>
       <tr><th style="width:9rem">意图来源</th><td>{{ intent_view.get('意图来源', '—') }}</td></tr>
       <tr><th>意图类型</th><td>{{ intent_view.get('意图类型', '—') }}</td></tr>
+      {% if intent_view.get('能力清单') %}
+      <tr><th>可支持能力</th><td>{{ intent_view.get('能力清单') | join('、') }}</td></tr>
+      {% endif %}
       <tr><th>指标</th><td>{{ intent_view.get('指标', []) | join('、') or '—' }}</td></tr>
       {% if intent_view.get('关联指标') %}
       <tr><th>关联指标</th><td>{{ intent_view.get('关联指标') | join('、') }}</td></tr>
@@ -91,7 +94,8 @@
 
 {% if not result.ok %}
 <div class="card">
-  <p class="err-box is-err" style="white-space: pre-line">错误：{{ result.error }}</p>
+  <h2>② {% if intent_view.get('意图类型') == '未识别' %}能力引导{% else %}说明{% endif %}</h2>
+  <p class="err-box is-err" style="white-space: pre-line">{{ result.error }}</p>
 </div>
 {% else %}
   {% if result.sql %}

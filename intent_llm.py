@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 INTENT_TYPES = frozenset({"数据查询", "指标口径咨询", "指标字典检索"})
 _ALLOWED_CURRENCIES = frozenset({"CNY", "USD", "ORIGIN"})
 
+# 问数域信号：有此类信号时，即使未抽出指标也不应降为「未识别」
+_BI_QUERY_HINT = re.compile(
+    r"查|查询|看下|看看|统计|汇总|对比|报表|指标|金额|成本|GAP|gap|"
+    r"人民币|美元|CNY|USD|项目|电站|区域|数据|P\d{3,}",
+    re.I,
+)
+_ALL_METRICS_HINT = re.compile(
+    r"所有指标|全部指标|所有的指标|全部的指标|每个指标|各项指标|全部数据|所有数据"
+)
+
 CAPABILITY_HELP = (
     "暂未识别到明确意图。我目前可以帮你：\n"
     "1. 数据查询：查指标数值（生成并执行 SQL）\n"
@@ -211,11 +221,15 @@ def build_catalog() -> dict[str, Any]:
 
 def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
     metric_lines = []
+    queryable_names: list[str] = []
     for m in catalog["metrics"]:
         syns = _NAME_SYNONYMS.get(m["name"]) or []
         syn_part = f"（同义词仅作理解：{'、'.join(syns)}）" if syns else ""
         metric_lines.append(f"- {m['name']} [{m['type']}]{syn_part}")
+        if m.get("type") in ("derived", "composite") and m.get("name"):
+            queryable_names.append(m["name"])
     metric_block = "\n".join(metric_lines) or "(无)"
+    all_metrics_json = json.dumps(queryable_names, ensure_ascii=False)
 
     dim_block = (
         "\n".join(f"- {d['name']} (code={d['code']})" for d in catalog["dims"])
@@ -227,7 +241,7 @@ def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
 固定输出字段定义（必须全部返回，不存在的值填空数组/空字符串/null）
 {{
     "意图来源": "LLM结构化抽取",
-    "意图类型": "数据查询|指标口径咨询|指标字典检索",
+    "意图类型": "数据查询|指标口径咨询|指标字典检索|未识别",
     "指标": [],
     "币种": "",
     "分析维度": [],
@@ -237,26 +251,31 @@ def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
     "原始问句": ""
 }}
 枚举规则
-1. 意图类型判定规则
-- 数据查询：用户想获取指标数值、看报表数据
+1. 意图类型判定规则（务必区分）
+- 数据查询：用户想获取指标数值、看报表/项目数据（含「查询…数据」「看…指标」等），即使未点名具体指标名也判为数据查询
 - 指标口径咨询：用户问指标定义、计算公式、口径、含义（不查数值）
-- 指标字典检索：用户想查找有哪些指标、指标清单
-2. 是否查询关联指标判定
+- 指标字典检索：用户想查找有哪些指标、指标清单（只要清单不要数值）
+- 未识别：与指标/报表/口径完全无关的闲聊或其它请求（如唱歌、天气、写诗）→ 必须标未识别，不要强行标数据查询
+2. 「所有指标 / 全部指标 / 所有指标数据」
+- 意图类型=数据查询
+- 指标数组填写下列「平台指标字典」中全部【derived/composite】标准名称（不要只留空）
+- 同时识别筛选条件（如项目编号 P001）
+3. 是否查询关联指标判定
 当问句包含：相关指标、关联指标、对应的原子、派生指标、依赖指标、配套指标 → 设置为true；其余false
 例：“成本GAP以及其他相关的原子和派生指标” → 是否查询关联指标=true
-3. 币种识别关键词
+4. 币种识别关键词
 人民币、CNY、元 → "人民币(CNY)"；美元、USD、美金 → "美元(USD)"；原币、本位币以外原始货币 → "原币"
-4. 分析维度识别关键词：项目、项目编号、电站、区域、阶段、年份、月份
-5. 筛选条件：识别时间范围、项目范围、阶段名称等过滤条件（键用中文或英文均可，如 项目编号/project_number）
-6. 计算指令识别关键词：top、排序、从大到小、合计、汇总、对比；无则 null
+5. 分析维度识别关键词：项目、项目编号、电站、区域、阶段、年份、月份
+6. 筛选条件：识别时间范围、项目编号（如P001）、区域、电站等（键用中文或英文均可，如 项目编号/project_number）
+7. 计算指令识别关键词：top、排序、从大到小、合计、汇总、对比；无则 null
 
 约束规则
 1. 输出只能是纯JSON，不能附带任何说明文字、注释、代码块标记。
-2. 识别不到内容，对应字段填空、[]或者null，不要编造信息。
-3. 指标名称必须严格使用下列「平台指标字典」中的标准名称；识别不到的指标不要强行加入指标数组。同义词只用于理解，输出仍写标准名。
+2. 识别不到内容，对应字段填空、[]或者null，不要编造不存在的指标名。
+3. 指标名称必须严格使用下列「平台指标字典」中的标准名称；同义词只用于理解，输出仍写标准名。
 4. 【是否查询关联指标=true】含义：只取当前指标血缘上下游依赖指标，不是全平台所有指标（服务端会展开血缘）。
-5. 不做模糊猜指标，无匹配指标则指标数组为空。
-6. 原始问句必须原样回填用户输入。
+5. 原始问句必须原样回填用户输入。
+6. 闲聊/非问数 → 意图类型必须为「未识别」，指标=[]。
 
 平台指标字典：
 {metric_block}
@@ -264,9 +283,17 @@ def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
 当前可分析维度（供参考）：
 {dim_block}
 
-示例输入：所有项目的成本GAP以及其他相关的原子和派生指标，人民币
-示例输出：
+示例1输入：所有项目的成本GAP以及其他相关的原子和派生指标，人民币
+示例1输出：
 {{"意图来源":"LLM结构化抽取","意图类型":"数据查询","指标":["成本GAP"],"币种":"人民币(CNY)","分析维度":[],"筛选条件":{{}},"计算指令":null,"是否查询关联指标":true,"原始问句":"所有项目的成本GAP以及其他相关的原子和派生指标，人民币"}}
+
+示例2输入：查询项目号P001的所有指标数据
+示例2输出：
+{{"意图来源":"LLM结构化抽取","意图类型":"数据查询","指标":{all_metrics_json},"币种":"","分析维度":[],"筛选条件":{{"项目编号":"P001"}},"计算指令":null,"是否查询关联指标":false,"原始问句":"查询项目号P001的所有指标数据"}}
+
+示例3输入：可以给我唱首歌？
+示例3输出：
+{{"意图来源":"LLM结构化抽取","意图类型":"未识别","指标":[],"币种":"","分析维度":[],"筛选条件":{{}},"计算指令":null,"是否查询关联指标":false,"原始问句":"可以给我唱首歌？"}}
 """
     return [
         {"role": "system", "content": system},
@@ -521,9 +548,13 @@ def normalize_llm_payload(
     text = raw_text or str(_get(raw, "原始问句", "raw_text", default="") or "")
 
     intent_type = str(_get(raw, "意图类型", "intent_type", default="数据查询") or "").strip()
-    if intent_type not in INTENT_TYPES:
+    if intent_type == "未识别":
+        pass
+    elif intent_type not in INTENT_TYPES:
         # soft map
-        if any(k in intent_type for k in ("口径", "定义", "公式", "含义")):
+        if any(k in intent_type for k in ("未识别", "unknown", "不清楚", "无法识别")):
+            intent_type = "未识别"
+        elif any(k in intent_type for k in ("口径", "定义", "公式", "含义")):
             intent_type = "指标口径咨询"
         elif any(k in intent_type for k in ("字典", "清单", "有哪些", "列表")):
             intent_type = "指标字典检索"
@@ -606,7 +637,32 @@ def normalize_llm_payload(
     if include_related:
         payload_zh["关联指标"] = related_names
 
-    # Data query without metrics → still return intent (caller / engine handles)
+    # 「所有指标」且指标仍空：服务端展开全部可查询指标（derived/composite）
+    if (
+        intent_type == "数据查询"
+        and not query_ids
+        and _ALL_METRICS_HINT.search(text)
+    ):
+        expand_ids = [
+            m["id"]
+            for m in catalog["metrics"]
+            if m.get("type") in ("derived", "composite") and m.get("id")
+        ]
+        query_ids = _queryable_metric_ids(expand_ids)
+        metric_names = [
+            catalog["id_to_name"].get(i, i) for i in query_ids if i in catalog["id_to_name"]
+        ]
+        payload_zh["指标"] = metric_names
+        payload_zh["展开说明"] = "问句含「所有指标」，已展开平台可查询指标"
+
+    # 仅当无问数域信号时，空指标的「数据查询」才降为未识别（避免误伤真查询）
+    if intent_type == "数据查询" and not query_ids and not metric_names:
+        if _BI_QUERY_HINT.search(text) or filters:
+            payload_zh["校验告警"] = "未点名具体指标，请补充指标名称；或改口「所有指标」以展开全部可查询指标"
+        else:
+            intent_type = "未识别"
+            payload_zh["意图类型"] = "未识别"
+
     return Intent(
         metric_ids=query_ids,
         currency=currency_code,
@@ -661,7 +717,7 @@ def needs_capability_help(intent: Intent) -> bool:
     """自然语言未落入可执行意图时，应返回能力引导而非强行跑 SQL。"""
     if getattr(intent, "capability_help_msg", None):
         return True
-    if intent.intent_type not in INTENT_TYPES:
+    if intent.intent_type == "未识别" or intent.intent_type not in INTENT_TYPES:
         return True
     if intent.intent_type == "数据查询" and not intent.metric_ids and not intent.metric_names:
         return True
@@ -671,10 +727,20 @@ def needs_capability_help(intent: Intent) -> bool:
 def capability_help_result(intent: Intent) -> EngineResult:
     """未识别意图时的统一反馈。"""
     msg = getattr(intent, "capability_help_msg", None) or CAPABILITY_HELP
+    # 展示层明确标为未识别，避免仍显示「数据查询」
+    intent.intent_type = "未识别"
+    if intent.payload_zh is not None:
+        intent.payload_zh = dict(intent.payload_zh)
+        intent.payload_zh["意图类型"] = "未识别"
+        intent.payload_zh.setdefault(
+            "能力清单", [c["type"] for c in SUPPORTED_CAPABILITIES]
+        )
     intent_dict = intent_to_engine_dict(intent)
     payload = dict(intent_dict.get("payload_zh") or {})
+    payload["意图类型"] = "未识别"
     payload.setdefault("能力清单", [c["type"] for c in SUPPORTED_CAPABILITIES])
     intent_dict["payload_zh"] = payload
+    intent_dict["intent_type"] = "未识别"
     return EngineResult(ok=False, intent=intent_dict, error=msg)
 
 

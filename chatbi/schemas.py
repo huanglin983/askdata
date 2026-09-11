@@ -10,7 +10,9 @@ class IntentStruct(BaseModel):
     """标准化意图结构体，JSON 字段与历史 ask 接口 payload_zh 兼容。"""
 
     意图来源: str
-    意图类型: str = Field(pattern="^(数据查询|指标口径咨询|指标字典检索)$")
+    意图类型: str = Field(
+        pattern="^(数据查询|指标口径咨询|指标字典检索|未识别)$"
+    )
     指标: List[str] = Field(default_factory=list)
     币种: str = ""
     分析维度: List[str] = Field(default_factory=list)

@@ -51,6 +51,12 @@ def _build_workflow(catalog: dict[str, Any]):
     # 复用百炼侧带指标字典的 system prompt（去掉末尾示例问句绑定）
     system_prompt = intent_llm.build_messages("", catalog)[0]["content"]
     llm = BailianChatClient() if use_bailian else ForceRuleLLMClient()
+    logger.info(
+        "ChatBI workflow build bailian=%s metrics=%d dims=%d",
+        use_bailian,
+        len(metric_names),
+        len(dim_names),
+    )
     workflow = ChatBIWorkflow(
         llm_client=llm,
         metric_dict=metric_names,
@@ -95,24 +101,61 @@ def from_text_chatbi(text: str, *, session_id: str | None = None) -> Intent:
             intent.payload_zh["校验告警"] = out["warning"]
 
     route = out.get("route") or {}
-    if out.get("code") == "unknown" or route.get("action") == "unknown":
+    if (
+        out.get("code") == "unknown"
+        or route.get("action") == "unknown"
+        or intent.intent_type == "未识别"
+    ):
+        intent.intent_type = "未识别"
         intent.capability_help_msg = intent_llm.CAPABILITY_HELP
         if intent.payload_zh is not None:
+            intent.payload_zh["意图类型"] = "未识别"
             caps = route.get("capabilities") or intent_llm.SUPPORTED_CAPABILITIES
             intent.payload_zh["能力清单"] = [
                 c.get("type") if isinstance(c, dict) else c for c in caps
             ]
-        logger.info("chatbi unknown intent → capability help, query=%s", text)
+        logger.info("chatbi unrecognized intent → capability help, query=%s", text)
         return intent
 
-    # 数据查询但无有效指标：引导三类能力，避免直接抛「未指定指标」
-    if intent.intent_type == "数据查询" and not intent.metric_ids and not intent.metric_names:
-        intent.capability_help_msg = intent_llm.CAPABILITY_HELP
+    # 「所有指标」兜底展开（LLM 漏填指标时）
+    if (
+        intent.intent_type == "数据查询"
+        and not intent.metric_ids
+        and intent_llm._ALL_METRICS_HINT.search(text)
+    ):
+        expand_ids = [
+            m["id"]
+            for m in catalog["metrics"]
+            if m.get("type") in ("derived", "composite") and m.get("id")
+        ]
+        intent.metric_ids = intent_llm._queryable_metric_ids(expand_ids)
+        intent.metric_names = [
+            catalog["id_to_name"].get(i, i)
+            for i in intent.metric_ids
+            if i in catalog["id_to_name"]
+        ]
         if intent.payload_zh is not None:
-            intent.payload_zh["能力清单"] = [
-                c["type"] for c in intent_llm.SUPPORTED_CAPABILITIES
-            ]
-        logger.info("chatbi empty metrics → capability help, query=%s", text)
+            intent.payload_zh["指标"] = list(intent.metric_names)
+            intent.payload_zh["展开说明"] = "问句含「所有指标」，已展开平台可查询指标"
+        logger.info(
+            "chatbi expanded all queryable metrics count=%d query=%s",
+            len(intent.metric_ids),
+            text,
+        )
+
+    # 真问数但无指标：保留数据查询，提示补指标（不再伪装成未识别）
+    if intent.intent_type == "数据查询" and not intent.metric_ids and not intent.metric_names:
+        names = [
+            m["name"]
+            for m in catalog["metrics"]
+            if m.get("type") in ("derived", "composite") and m.get("name")
+        ]
+        hint = "、".join(names[:8]) + ("…" if len(names) > 8 else "")
+        intent.disambiguate_msg = (
+            f"已识别为数据查询，但未点名具体指标。请补充指标名称"
+            f"（例如：{hint}），或改口「查询…的所有指标数据」。"
+        )
+        logger.info("chatbi data query missing metrics → ask pick, query=%s", text)
 
     return intent
 

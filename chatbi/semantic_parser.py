@@ -16,6 +16,10 @@ _RELATED_HINT = re.compile(
 _CALIBER_HINT = re.compile(r"口径|定义|计算公式|含义是什么|怎么算|是什么")
 _DICT_HINT = re.compile(r"有哪些指标|指标清单|指标字典|指标列表")
 _CALC_HINT = re.compile(r"\btop\b|TopN|前\s*\d+|排序|从大到小|合计|汇总|对比", re.I)
+# 问数域弱信号：有指标候选或出现分析/币种/查询类词才视为可能的数据查询
+_BI_WEAK_HINT = re.compile(
+    r"查|查询|看|统计|汇总|对比|报表|指标|金额|成本|GAP|gap|人民币|美元|CNY|USD|项目|电站|区域"
+)
 
 
 class BaseSemanticParser:
@@ -54,8 +58,9 @@ class LLMSemanticParser(BaseSemanticParser):
         if not intent.筛选条件 and schema_info.filter_candidates:
             intent.筛选条件 = dict(schema_info.filter_candidates)
         logger.info(
-            "LLMSemanticParser output intent=%s",
+            "LLMSemanticParser output intent=%s client=%s",
             intent.model_dump(),
+            type(self.llm_client).__name__,
         )
         return intent
 
@@ -76,17 +81,26 @@ class RuleSemanticParser(BaseSemanticParser):
             intent_type = "指标字典检索"
         elif _CALIBER_HINT.search(query):
             intent_type = "指标口径咨询"
-        else:
+        elif schema_info.metric_candidates or _BI_WEAK_HINT.search(query):
             intent_type = "数据查询"
+        else:
+            # 无指标候选且无问数域信号（如闲聊）→ 未识别，走能力引导
+            intent_type = "未识别"
 
         calc_cmd = None
         if _CALC_HINT.search(query):
             calc_cmd = "TopN" if re.search(r"\btop\b|前\s*\d+", query, re.I) else "排序/汇总"
 
+        # 「所有指标」：指标列表留空，由 intent_chatbi / normalize 展开可查询全集
+        metrics = list(schema_info.metric_candidates)
+        if re.search(r"所有指标|全部指标|所有的指标|全部的指标", query):
+            intent_type = "数据查询"
+            metrics = []
+
         intent = IntentStruct(
             意图来源="规则兜底",
             意图类型=intent_type,
-            指标=list(schema_info.metric_candidates),
+            指标=metrics,
             币种=schema_info.currency_candidate or "",
             分析维度=list(schema_info.dim_candidates),
             筛选条件=dict(schema_info.filter_candidates),
