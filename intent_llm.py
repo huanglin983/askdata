@@ -1,6 +1,6 @@
-"""Bailian (DashScope OpenAI-compatible) intent parsing.
+"""Bailian intent: Chinese structured extraction schema + whitelist normalize.
 
-Model outputs structured Intent JSON only. Never SQL / business口径.
+LLM does entity extraction only — never SQL / numeric computation.
 """
 from __future__ import annotations
 
@@ -12,27 +12,87 @@ from typing import Any
 
 import db
 import meta
-from engine import Intent
+from engine import Intent, EngineResult
 
 logger = logging.getLogger(__name__)
 
+INTENT_TYPES = frozenset({"数据查询", "指标口径咨询", "指标字典检索"})
 _ALLOWED_CURRENCIES = frozenset({"CNY", "USD", "ORIGIN"})
-_FILTER_KEYS = frozenset({"project_number", "region", "power_plant"})
 
-# Common aliases → metric id (also in keyword path)
-_ALIAS_TO_ID = {
-    "成本差距": "cmp_cost_gap",
-    "成本GAP": "cmp_cost_gap",
-    "成本Gap": "cmp_cost_gap",
-    "成本gap": "cmp_cost_gap",
-    "GAP率": "cmp_cost_gap_rate",
-    "gap率": "cmp_cost_gap_rate",
-    "成本GAP率": "cmp_cost_gap_rate",
+# Display currency labels ↔ engine codes
+_CURRENCY_LABEL_TO_CODE = {
+    "人民币(CNY)": "CNY",
+    "人民币": "CNY",
+    "CNY": "CNY",
+    "RMB": "CNY",
+    "元": "CNY",
+    "美元(USD)": "USD",
+    "美元": "USD",
+    "USD": "USD",
+    "美金": "USD",
+    "原币(ORIGIN)": "ORIGIN",
+    "原币": "ORIGIN",
+    "ORIGIN": "ORIGIN",
+}
+_CURRENCY_CODE_TO_LABEL = {
+    "CNY": "人民币(CNY)",
+    "USD": "美元(USD)",
+    "ORIGIN": "原币",
+}
+
+# Analysis dim keyword → preferred code (then filtered by catalog)
+_DIM_KEYWORDS: list[tuple[str, str]] = [
+    ("项目编号", "project_number"),
+    ("项目名称", "project_name"),
+    ("项目名", "project_name"),
+    ("电站", "power_plant"),
+    ("区域", "region"),
+    ("大区", "region"),
+    ("阶段", "stage_type"),
+    ("年份", "year"),
+    ("月份", "month"),
+    ("项目", "project_number"),  # last: broad
+]
+
+# Synonyms shown to LLM; output must use 标准名 only
+_NAME_SYNONYMS: dict[str, list[str]] = {
+    "成本GAP": ["成本差距", "成本gap", "成本Gap", "GAP", "gap"],
+    "成本GAP率": ["GAP率", "gap率", "成本gap率"],
+}
+
+_FILTER_KEYS = frozenset(
+    {
+        "project_number",
+        "region",
+        "power_plant",
+        "project_name",
+        "stage_type",
+        "year",
+        "month",
+        "时间范围",
+        "项目范围",
+        "阶段",
+    }
+)
+
+_FILTER_KEY_ALIASES = {
+    "项目编号": "project_number",
+    "项目": "project_number",
+    "项目号": "project_number",
+    "区域": "region",
+    "大区": "region",
+    "电站": "power_plant",
+    "项目名称": "project_name",
+    "阶段": "stage_type",
+    "阶段名称": "stage_type",
+    "年份": "year",
+    "年": "year",
+    "月份": "month",
+    "月": "month",
 }
 
 
 def load_dotenv_file(path: str | None = None) -> None:
-    """Load KEY=VALUE from .env into os.environ if not already set (no extra deps)."""
     env_path = path or os.path.join(os.path.dirname(__file__), ".env")
     if not os.path.isfile(env_path):
         return
@@ -57,86 +117,134 @@ def bailian_configured() -> bool:
 
 
 def build_catalog() -> dict[str, Any]:
-    """Whitelist of metrics / dims / currencies for the prompt + normalize."""
+    """Full metric dictionary (atomic/derived/composite) for exact-name matching."""
     metrics: list[dict[str, str]] = []
     name_to_id: dict[str, str] = {}
+    id_to_name: dict[str, str] = {}
     id_set: set[str] = set()
+    id_to_type: dict[str, str] = {}
 
-    for r in db.list_composite():
-        mid, name = r["id"], r["name"] or ""
-        metrics.append({"id": mid, "name": name, "type": "composite"})
+    for r in db.list_atomic():
+        mid, name = r["id"], (r["name"] or "").strip()
+        metrics.append({"id": mid, "name": name, "type": "atomic"})
         id_set.add(mid)
+        id_to_type[mid] = "atomic"
+        id_to_name[mid] = name
         if name:
             name_to_id[name] = mid
-    for r in db.list_derived(exposed_only=True):
-        mid, name = r["id"], r["name"] or ""
+
+    for r in db.list_derived():  # include non-exposed for lineage / dict
+        mid, name = r["id"], (r["name"] or "").strip()
         metrics.append({"id": mid, "name": name, "type": "derived"})
         id_set.add(mid)
+        id_to_type[mid] = "derived"
+        id_to_name[mid] = name
         if name:
             name_to_id[name] = mid
 
-    for alias, mid in _ALIAS_TO_ID.items():
-        if mid in id_set:
-            name_to_id.setdefault(alias, mid)
+    for r in db.list_composite():
+        mid, name = r["id"], (r["name"] or "").strip()
+        metrics.append({"id": mid, "name": name, "type": "composite"})
+        id_set.add(mid)
+        id_to_type[mid] = "composite"
+        id_to_name[mid] = name
+        if name:
+            name_to_id[name] = mid
+
+    # synonym → standard name only (not free-form fuzzy)
+    synonym_to_standard: dict[str, str] = {}
+    for standard, syns in _NAME_SYNONYMS.items():
+        if standard not in name_to_id:
+            continue
+        for s in syns:
+            synonym_to_standard[s] = standard
+            synonym_to_standard[s.lower()] = standard
 
     dims = [
         {"code": d["code"], "name": d["name"]}
         for d in meta.list_ask_analysis_fields()
     ]
+    # also expose grain / common codes for keyword mapping even if not analysis
     dim_codes = {d["code"] for d in dims}
+    for code in ("project_number", "power_plant", "region", "project_name"):
+        if code not in dim_codes:
+            # still allow as filter key; analysis dim only if meta says so
+            pass
+
     currencies = [
         {"code": c["code"], "name": c["name"]} for c in db.list_currency_rules()
     ]
     return {
         "metrics": metrics,
         "name_to_id": name_to_id,
+        "id_to_name": id_to_name,
+        "id_to_type": id_to_type,
         "id_set": id_set,
+        "synonym_to_standard": synonym_to_standard,
         "dims": dims,
         "dim_codes": dim_codes,
         "currencies": currencies,
-        "currency_codes": {c["code"] for c in currencies} | set(_ALLOWED_CURRENCIES),
-        "filter_keys": sorted(_FILTER_KEYS),
     }
 
 
 def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
-    metric_lines = "\n".join(
-        f"- id={m['id']} name={m['name']} type={m['type']}" for m in catalog["metrics"]
+    metric_lines = []
+    for m in catalog["metrics"]:
+        syns = _NAME_SYNONYMS.get(m["name"]) or []
+        syn_part = f"（同义词仅作理解：{'、'.join(syns)}）" if syns else ""
+        metric_lines.append(f"- {m['name']} [{m['type']}]{syn_part}")
+    metric_block = "\n".join(metric_lines) or "(无)"
+
+    dim_block = (
+        "\n".join(f"- {d['name']} (code={d['code']})" for d in catalog["dims"])
+        or "（元数据暂无勾选分析维度；仍可识别口语维度词写入分析维度数组，由服务端过滤）"
     )
-    dim_lines = "\n".join(
-        f"- code={d['code']} name={d['name']}" for d in catalog["dims"]
-    ) or "(无)"
-    cur_lines = "\n".join(
-        f"- code={c['code']} name={c['name']}" for c in catalog["currencies"]
-    )
-    system = f"""你是财务问数系统的意图解析器。只把用户问句解析为结构化 JSON，禁止编写 SQL、表名、汇率公式或业务口径。
 
-必须只输出一个 JSON 对象，字段：
-- metric_ids: string[]，只能使用下列指标的 id（优先）或中文 name（服务端会映射）
-- currency: 只能是 CNY / USD / ORIGIN 之一
-- dims: string[]，只能使用下列分析维度的 code
-- filters: object，键只能是 {catalog["filter_keys"]} 中的键；值为用户提到的筛选值
-- confidence: number 0~1
+    system = f"""你是指标平台的自然语言意图抽取器，仅做实体抽取，严禁生成SQL、不计算数值。
+输入：用户的原始查询问句；输出严格输出JSON，不要额外解释、不要markdown。
+固定输出字段定义（必须全部返回，不存在的值填空数组/空字符串/null）
+{{
+    "意图来源": "LLM结构化抽取",
+    "意图类型": "数据查询|指标口径咨询|指标字典检索",
+    "指标": [],
+    "币种": "",
+    "分析维度": [],
+    "筛选条件": {{}},
+    "计算指令": null,
+    "是否查询关联指标": false,
+    "原始问句": ""
+}}
+枚举规则
+1. 意图类型判定规则
+- 数据查询：用户想获取指标数值、看报表数据
+- 指标口径咨询：用户问指标定义、计算公式、口径、含义（不查数值）
+- 指标字典检索：用户想查找有哪些指标、指标清单
+2. 是否查询关联指标判定
+当问句包含：相关指标、关联指标、对应的原子、派生指标、依赖指标、配套指标 → 设置为true；其余false
+例：“成本GAP以及其他相关的原子和派生指标” → 是否查询关联指标=true
+3. 币种识别关键词
+人民币、CNY、元 → "人民币(CNY)"；美元、USD、美金 → "美元(USD)"；原币、本位币以外原始货币 → "原币"
+4. 分析维度识别关键词：项目、项目编号、电站、区域、阶段、年份、月份
+5. 筛选条件：识别时间范围、项目范围、阶段名称等过滤条件（键用中文或英文均可，如 项目编号/project_number）
+6. 计算指令识别关键词：top、排序、从大到小、合计、汇总、对比；无则 null
 
-可选指标目录：
-{metric_lines}
+约束规则
+1. 输出只能是纯JSON，不能附带任何说明文字、注释、代码块标记。
+2. 识别不到内容，对应字段填空、[]或者null，不要编造信息。
+3. 指标名称必须严格使用下列「平台指标字典」中的标准名称；识别不到的指标不要强行加入指标数组。同义词只用于理解，输出仍写标准名。
+4. 【是否查询关联指标=true】含义：只取当前指标血缘上下游依赖指标，不是全平台所有指标（服务端会展开血缘）。
+5. 不做模糊猜指标，无匹配指标则指标数组为空。
+6. 原始问句必须原样回填用户输入。
 
-可选分析维度：
-{dim_lines}
+平台指标字典：
+{metric_block}
 
-可选币种：
-{cur_lines}
+当前可分析维度（供参考）：
+{dim_block}
 
-规则：
-1. 未提到的维度不要填；未提到的筛选不要编造。
-2. 指标别名：「成本GAP」「成本差距」「GAP」→ cmp_cost_gap；「GAP率」→ cmp_cost_gap_rate。
-3. 维度口语：「带电站」「按电站」「电站」→ power_plant；「区域」「大区」→ region；「项目名称」→ project_name。
-4. 筛选：「项目P001」「P001」→ filters.project_number=P001。
-5. 币种：「人民币」→ CNY；「美元」→ USD；「原币」→ ORIGIN。
-6. 不要输出除上述字段外的键（尤其不要 sql）。
-
-示例问句：查询项目P001的成本GAP，人民币，带电站
-示例 JSON：{{"metric_ids":["cmp_cost_gap"],"currency":"CNY","dims":["power_plant"],"filters":{{"project_number":"P001"}},"confidence":0.95}}
+示例输入：所有项目的成本GAP以及其他相关的原子和派生指标，人民币
+示例输出：
+{{"意图来源":"LLM结构化抽取","意图类型":"数据查询","指标":["成本GAP"],"币种":"人民币(CNY)","分析维度":[],"筛选条件":{{}},"计算指令":null,"是否查询关联指标":true,"原始问句":"所有项目的成本GAP以及其他相关的原子和派生指标，人民币"}}
 """
     return [
         {"role": "system", "content": system},
@@ -144,8 +252,8 @@ def build_messages(text: str, catalog: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def call_bailian(messages: list[dict[str, str]]) -> dict[str, Any]:
-    """Call DashScope OpenAI-compatible chat completions; return parsed JSON dict."""
+def call_bailian_raw(messages: list[dict[str, str]]) -> str:
+    """调用百炼，返回原始文本（供 ChatBI LLMSemanticParser 自行 JSON 清洗）。"""
     load_dotenv_file()
     api_key = (os.environ.get("DASHSCOPE_API_KEY") or "").strip()
     if not api_key:
@@ -169,7 +277,6 @@ def call_bailian(messages: list[dict[str, str]]) -> dict[str, Any]:
         "messages": messages,
         "temperature": 0,
     }
-    # Prefer JSON mode when supported
     try:
         resp = client.chat.completions.create(
             **kwargs, response_format={"type": "json_object"}
@@ -177,7 +284,11 @@ def call_bailian(messages: list[dict[str, str]]) -> dict[str, Any]:
     except Exception:
         resp = client.chat.completions.create(**kwargs)
 
-    content = (resp.choices[0].message.content or "").strip()
+    return (resp.choices[0].message.content or "").strip()
+
+
+def call_bailian(messages: list[dict[str, str]]) -> dict[str, Any]:
+    content = call_bailian_raw(messages)
     return _parse_json_content(content)
 
 
@@ -196,104 +307,426 @@ def _parse_json_content(content: str) -> dict[str, Any]:
     return data
 
 
-def normalize_intent(
-    raw: dict[str, Any], catalog: dict[str, Any], *, raw_text: str
-) -> Intent:
-    """Map names→ids, drop illegal items. Empty metric_ids → raise for fallback."""
-    name_to_id: dict[str, str] = catalog["name_to_id"]
-    id_set: set[str] = catalog["id_set"]
-    dim_codes: set[str] = catalog["dim_codes"]
-    currency_codes: set[str] = catalog["currency_codes"]
+def _get(raw: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for k in keys:
+        if k in raw:
+            return raw[k]
+    return default
 
-    metric_ids: list[str] = []
-    for item in raw.get("metric_ids") or []:
+
+def _match_metric_name(token: str, catalog: dict[str, Any]) -> str | None:
+    """Return standard dictionary name or None. No fuzzy guess beyond synonym map."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    name_to_id = catalog["name_to_id"]
+    if token in name_to_id:
+        return token
+    # case-insensitive exact
+    for name in name_to_id:
+        if name.lower() == token.lower():
+            return name
+    syn = catalog["synonym_to_standard"]
+    if token in syn:
+        return syn[token]
+    if token.lower() in syn:
+        return syn[token.lower()]
+    return None
+
+
+def _parse_currency(label: Any) -> tuple[str, str]:
+    """Return (engine_code, display_label)."""
+    s = str(label or "").strip()
+    if not s:
+        return "CNY", ""
+    code = _CURRENCY_LABEL_TO_CODE.get(s) or _CURRENCY_LABEL_TO_CODE.get(s.upper())
+    if not code:
+        # partial
+        if re.search(r"美元|USD|美金", s, re.I):
+            code = "USD"
+        elif re.search(r"原币|ORIGIN", s, re.I):
+            code = "ORIGIN"
+        elif re.search(r"人民币|CNY|RMB|元", s, re.I):
+            code = "CNY"
+        else:
+            code = "CNY"
+    label_out = _CURRENCY_CODE_TO_LABEL.get(code, s)
+    if code not in _ALLOWED_CURRENCIES:
+        code, label_out = "CNY", "人民币(CNY)"
+    return code, label_out
+
+
+def _normalize_dims(raw_dims: Any, text: str, catalog: dict[str, Any]) -> list[str]:
+    """Map LLM dim labels / codes to analysis dim codes present in meta."""
+    dim_codes = catalog["dim_codes"]
+    name_to_code = {d["name"]: d["code"] for d in catalog["dims"]}
+    out: list[str] = []
+
+    def add(code: str) -> None:
+        if code in dim_codes and code not in out:
+            # grain usually not as extra analysis dim
+            d = meta.get_analysis_field_by_code(code)
+            if d and (
+                d.get("dim_role") == "grain" or d.get("semantic_role") == "grain"
+            ):
+                return
+            out.append(code)
+
+    for item in raw_dims or []:
         token = str(item).strip()
         if not token:
             continue
-        if token in id_set:
-            mid = token
-        elif token in name_to_id:
-            mid = name_to_id[token]
-        elif token in _ALIAS_TO_ID and _ALIAS_TO_ID[token] in id_set:
-            mid = _ALIAS_TO_ID[token]
-        else:
-            # case-insensitive name match
-            mid = ""
-            for name, nid in name_to_id.items():
-                if name.lower() == token.lower():
-                    mid = nid
-                    break
-            if not mid:
-                logger.info("drop unknown metric token: %s", token)
-                continue
-        if mid not in metric_ids:
-            metric_ids.append(mid)
+        if token in dim_codes:
+            add(token)
+            continue
+        if token in name_to_code:
+            add(name_to_code[token])
+            continue
+        for kw, code in _DIM_KEYWORDS:
+            if kw == token or kw in token:
+                add(code)
+                break
 
-    if not metric_ids:
-        raise ValueError("百炼意图未识别到白名单内的指标")
+    # light keyword enrich from original text for dims LLM missed
+    for kw, code in _DIM_KEYWORDS:
+        if kw in text:
+            add(code)
 
-    currency = str(raw.get("currency") or "CNY").strip().upper()
-    if currency not in currency_codes or currency not in _ALLOWED_CURRENCIES:
-        currency = "CNY"
+    return out
 
-    dims: list[str] = []
-    for d in raw.get("dims") or []:
-        code = str(d).strip()
-        if code in dim_codes and code not in dims:
-            dims.append(code)
-        else:
-            # allow match by Chinese name
-            for dd in catalog["dims"]:
-                if dd["name"] == code and dd["code"] not in dims:
-                    dims.append(dd["code"])
-                    break
 
-    filters: dict[str, str] = {}
-    raw_filters = raw.get("filters") or {}
+def _normalize_filters(raw_filters: Any, text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
     if isinstance(raw_filters, dict):
         for k, v in raw_filters.items():
             key = str(k).strip()
-            if key not in _FILTER_KEYS:
+            key = _FILTER_KEY_ALIASES.get(key, key)
+            if key not in _FILTER_KEYS and key not in (
+                "project_number",
+                "region",
+                "power_plant",
+                "project_name",
+                "stage_type",
+                "year",
+                "month",
+            ):
+                # keep Chinese keys that look like filters for display; map known
                 continue
             val = str(v).strip() if v is not None else ""
-            if val:
-                if key == "project_number":
-                    val = val.upper()
-                filters[key] = val
+            if not val:
+                continue
+            if key == "project_number":
+                val = val.upper()
+            out[key] = val
 
+    # keyword enrich project id
+    if "project_number" not in out:
+        m = re.search(r"(?:项目\s*)?(P\d{3,})", text, re.I)
+        if m:
+            out["project_number"] = m.group(1).upper()
+    return out
+
+
+def empty_payload_zh(raw_text: str = "") -> dict[str, Any]:
+    return {
+        "意图来源": "LLM结构化抽取",
+        "意图类型": "数据查询",
+        "指标": [],
+        "币种": "",
+        "分析维度": [],
+        "筛选条件": {},
+        "计算指令": None,
+        "是否查询关联指标": False,
+        "原始问句": raw_text or "",
+    }
+
+
+def lineage_related_ids(root_ids: list[str]) -> list[str]:
+    """Bloodline: descendants (and direct atomic parents of derived). Not whole platform."""
+    import metric_map
+
+    related: list[str] = []
+    seen: set[str] = set(root_ids)
+
+    def walk(mid: str) -> None:
+        node = metric_map._expand(mid, visiting=set())
+        if not node:
+            return
+
+        def collect(n: dict[str, Any]) -> None:
+            cid = n["id"]
+            if cid not in seen:
+                seen.add(cid)
+                related.append(cid)
+            for ch in n.get("children") or []:
+                collect(ch)
+
+        # children only (exclude root itself from related list)
+        for ch in node.get("children") or []:
+            collect(ch)
+
+    for rid in root_ids:
+        walk(rid)
+
+    # upstream: composites that list this id as sub-metric
+    for c in db.list_composite():
+        subs = json.loads(c["sub_metric_ids"] or "[]")
+        if any(r in subs for r in root_ids) and c["id"] not in seen:
+            seen.add(c["id"])
+            related.append(c["id"])
+
+    return related
+
+
+def _queryable_metric_ids(ids: list[str]) -> list[str]:
+    """Keep metrics the ask engine accepts as top-level (derived / composite).
+
+    Atomics appear in 关联指标 display / 口径咨询, but data-query SELECT
+    uses derived/composite only (engine dim-bind path rejects bare atomics).
+    """
+    out: list[str] = []
+    for mid in ids:
+        if db.get_composite(mid) or db.get_derived(mid):
+            if mid not in out:
+                out.append(mid)
+    return out
+
+
+def normalize_llm_payload(
+    raw: dict[str, Any], catalog: dict[str, Any], *, raw_text: str
+) -> Intent:
+    """Map Chinese schema → Intent; build payload_zh for UI."""
+    text = raw_text or str(_get(raw, "原始问句", "raw_text", default="") or "")
+
+    intent_type = str(_get(raw, "意图类型", "intent_type", default="数据查询") or "").strip()
+    if intent_type not in INTENT_TYPES:
+        # soft map
+        if any(k in intent_type for k in ("口径", "定义", "公式", "含义")):
+            intent_type = "指标口径咨询"
+        elif any(k in intent_type for k in ("字典", "清单", "有哪些", "列表")):
+            intent_type = "指标字典检索"
+        else:
+            intent_type = "数据查询"
+
+    include_related = bool(
+        _get(raw, "是否查询关联指标", "include_related", default=False)
+    )
+    calc = _get(raw, "计算指令", "calc_instruction", default=None)
+    if calc is not None:
+        calc = str(calc).strip() or None
+
+    metric_names: list[str] = []
+    metric_ids: list[str] = []
+    for item in _get(raw, "指标", "metrics", "metric_ids", default=[]) or []:
+        standard = _match_metric_name(str(item), catalog)
+        if not standard:
+            logger.info("drop non-dictionary metric: %s", item)
+            continue
+        mid = catalog["name_to_id"][standard]
+        if mid not in metric_ids:
+            metric_ids.append(mid)
+            metric_names.append(standard)
+
+    currency_code, currency_label = _parse_currency(
+        _get(raw, "币种", "currency", default="")
+    )
+    dims = _normalize_dims(
+        _get(raw, "分析维度", "dims", default=[]), text, catalog
+    )
+    filters = _normalize_filters(_get(raw, "筛选条件", "filters", default={}), text)
+
+    related_ids: list[str] = []
+    related_names: list[str] = []
+    if include_related and metric_ids:
+        related_ids = lineage_related_ids(metric_ids)
+        related_names = [
+            catalog["id_to_name"].get(i, i) for i in related_ids if i in catalog["id_to_name"]
+        ]
+
+    # For data query: merge queryable related into metric_ids
+    query_ids = list(metric_ids)
+    if include_related and intent_type == "数据查询":
+        for rid in _queryable_metric_ids(related_ids):
+            if rid not in query_ids:
+                query_ids.append(rid)
+
+    # Dim display labels
+    dim_labels = []
+    for code in dims:
+        d = meta.get_analysis_field_by_code(code)
+        dim_labels.append(d["name"] if d else code)
+
+    # Filters display: prefer Chinese keys
+    filters_zh: dict[str, str] = {}
+    key_zh = {
+        "project_number": "项目编号",
+        "region": "区域",
+        "power_plant": "电站",
+        "project_name": "项目名称",
+        "stage_type": "阶段",
+        "year": "年份",
+        "month": "月份",
+    }
+    for k, v in filters.items():
+        filters_zh[key_zh.get(k, k)] = v
+
+    payload_zh = {
+        "意图来源": "LLM结构化抽取",
+        "意图类型": intent_type,
+        "指标": metric_names,
+        "币种": currency_label,
+        "分析维度": dim_labels,
+        "筛选条件": filters_zh,
+        "计算指令": calc,
+        "是否查询关联指标": include_related,
+        "原始问句": text,
+    }
+    if include_related:
+        payload_zh["关联指标"] = related_names
+
+    # Data query without metrics → still return intent (caller / engine handles)
     return Intent(
-        metric_ids=metric_ids,
-        currency=currency,
+        metric_ids=query_ids,
+        currency=currency_code,
         dims=dims,
-        filters=filters,
-        raw_text=raw_text,
+        filters={
+            k: v
+            for k, v in filters.items()
+            if k in ("project_number", "region", "power_plant", "project_name")
+        },
+        raw_text=text,
         source="bailian",
+        intent_type=intent_type,
+        include_related=include_related,
+        calc_instruction=calc,
+        metric_names=metric_names,
+        related_metric_ids=related_ids,
+        payload_zh=payload_zh,
     )
 
 
 def from_text_bailian(text: str) -> Intent:
+    text = (text or "").strip()
     catalog = build_catalog()
     messages = build_messages(text, catalog)
     raw = call_bailian(messages)
-    # strip forbidden keys early
     raw.pop("sql", None)
-    intent = normalize_intent(raw, catalog, raw_text=text)
-    return _enrich_from_keywords(intent, text)
-
-
-def _enrich_from_keywords(intent: Intent, text: str) -> Intent:
-    """Fill missing dims/filters that keywords can detect (LLM often omits)."""
-    # late import to avoid circular import at module load
-    import intent as intent_mod
-
-    kw = intent_mod.from_text_keywords(text)
-    for d in kw.dims:
-        if d not in intent.dims and d in build_catalog()["dim_codes"]:
-            intent.dims.append(d)
-    for k, v in (kw.filters or {}).items():
-        if k not in intent.filters and v:
-            intent.filters[k] = v
-    if not intent.currency and kw.currency:
-        intent.currency = kw.currency
-    intent.source = "bailian"
+    # force 原始问句
+    raw["原始问句"] = text
+    intent = normalize_llm_payload(raw, catalog, raw_text=text)
     return intent
+
+
+def intent_to_engine_dict(intent: Intent) -> dict[str, Any]:
+    base = {
+        "metric_ids": intent.metric_ids,
+        "currency": intent.currency,
+        "dims": intent.dims,
+        "filters": intent.filters,
+        "raw_text": intent.raw_text,
+        "source": intent.source or "",
+        "intent_type": intent.intent_type,
+        "include_related": intent.include_related,
+        "calc_instruction": intent.calc_instruction,
+        "metric_names": list(intent.metric_names),
+        "related_metric_ids": list(intent.related_metric_ids),
+        "payload_zh": dict(intent.payload_zh or {}),
+    }
+    return base
+
+
+def handle_non_query(intent: Intent) -> EngineResult | None:
+    """Return EngineResult for 口径咨询 / 字典检索; None if should run SQL."""
+    if intent.intent_type == "数据查询":
+        return None
+
+    intent_dict = intent_to_engine_dict(intent)
+    catalog = build_catalog()
+
+    if intent.intent_type == "指标字典检索":
+        rows = []
+        # if user named metrics, filter; else list all (or related)
+        ids = list(intent.metric_ids) or [
+            m["id"] for m in catalog["metrics"]
+        ]
+        if intent.include_related and intent.metric_ids:
+            ids = list(dict.fromkeys(intent.metric_ids + intent.related_metric_ids))
+        for mid in ids:
+            mtype = catalog["id_to_type"].get(mid, "")
+            name = catalog["id_to_name"].get(mid, mid)
+            rows.append([name, mtype, mid])
+        return EngineResult(
+            ok=True,
+            sql="",
+            intent=intent_dict,
+            audit=[{"type": "dict", "name": "指标字典", "id": "dict", "note": "字典检索"}],
+            columns=["指标名称", "类型", "指标ID"],
+            rows=rows,
+        )
+
+    if intent.intent_type == "指标口径咨询":
+        if not intent.metric_ids and not intent.metric_names:
+            return EngineResult(
+                ok=False,
+                intent=intent_dict,
+                error="未识别到可咨询的指标，请使用平台字典中的标准名称",
+            )
+        audit = []
+        ids = list(intent.metric_ids)
+        if intent.include_related:
+            ids = list(dict.fromkeys(ids + intent.related_metric_ids))
+        for mid in ids:
+            c = db.get_composite(mid)
+            if c:
+                audit.append(
+                    {
+                        "type": "composite",
+                        "id": mid,
+                        "name": c["name"],
+                        "formula": c["formula"],
+                        "note": "口径咨询（不执行数值查询）",
+                        "grain": [],
+                    }
+                )
+                continue
+            d = db.get_derived(mid)
+            if d:
+                a = db.get_atomic(d["atomic_id"])
+                audit.append(
+                    {
+                        "type": "derived",
+                        "id": mid,
+                        "name": d["name"],
+                        "stage_type": d["stage_type"] or (a["stage_type"] if a else ""),
+                        "atomic_id": d["atomic_id"],
+                        "atomic_name": a["name"] if a else "",
+                        "amount_col": (a["source_field"] if a else d["amount_col"]),
+                        "rate_col": (a["rate_col"] if a else d["rate_col"]),
+                        "note": "口径咨询（不执行数值查询）",
+                    }
+                )
+                continue
+            a = db.get_atomic(mid)
+            if a:
+                audit.append(
+                    {
+                        "type": "atomic",
+                        "id": mid,
+                        "name": a["name"],
+                        "stage_type": a["stage_type"],
+                        "amount_col": a["source_field"],
+                        "rate_col": a["rate_col"],
+                        "remark": a["remark"] if "remark" in a.keys() else "",
+                        "note": "口径咨询（不执行数值查询）",
+                    }
+                )
+        return EngineResult(
+            ok=True,
+            sql="",
+            intent=intent_dict,
+            audit=audit,
+            columns=[],
+            rows=[],
+        )
+
+    return None

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 import db
 import display
@@ -12,7 +12,7 @@ import intent as intent_mod
 import meta
 import metric_sql
 import biz_arch
-from engine import build_composite_sql_preview, run
+from engine import EngineResult, build_composite_sql_preview, run
 import metric_map
 
 app = Flask(__name__)
@@ -752,11 +752,11 @@ def ask():
     result = None
     form = {
         "mode": "form",
-        "text": "查询项目P001的成本GAP，人民币，带电站",
+        "text": "所有项目的成本GAP以及其他相关的原子和派生指标，人民币",
         "metric_ids": ["cmp_cost_gap"],
         "currency": "CNY",
-        "dims": ["power_plant"],
-        "project_number": "P001",
+        "dims": [],
+        "project_number": "",
         "region": "",
         "power_plant": "",
     }
@@ -772,7 +772,39 @@ def ask():
         form["power_plant"] = request.form.get("power_plant", "")
 
         if form["mode"] == "text":
-            parsed = intent_mod.from_text(form["text"])
+            if not session.get("ask_session_id"):
+                session["ask_session_id"] = uuid.uuid4().hex
+            parsed = intent_mod.from_text(
+                form["text"], session_id=session["ask_session_id"]
+            )
+            # ChatBI 多指标消歧：提示反问，不执行 SQL
+            if getattr(parsed, "disambiguate_msg", None):
+                try:
+                    import intent_llm
+
+                    intent_dict = intent_llm.intent_to_engine_dict(parsed)
+                except Exception:  # noqa: BLE001
+                    intent_dict = {
+                        "metric_ids": parsed.metric_ids,
+                        "currency": parsed.currency,
+                        "dims": parsed.dims,
+                        "filters": parsed.filters,
+                        "raw_text": parsed.raw_text,
+                        "source": parsed.source or "",
+                        "intent_type": parsed.intent_type,
+                        "include_related": parsed.include_related,
+                        "calc_instruction": parsed.calc_instruction,
+                        "metric_names": list(parsed.metric_names or []),
+                        "related_metric_ids": list(parsed.related_metric_ids or []),
+                        "payload_zh": dict(parsed.payload_zh or {}),
+                    }
+                result = EngineResult(
+                    ok=False,
+                    intent=intent_dict,
+                    error=f"需要消歧：{parsed.disambiguate_msg}",
+                )
+            else:
+                result = None
         else:
             parsed = intent_mod.from_form(
                 metric_ids=form["metric_ids"],
@@ -783,7 +815,20 @@ def ask():
                 power_plant=form["power_plant"],
                 raw_text=form["text"],
             )
-        result = run(parsed)
+            result = None
+
+        if result is None:
+            # Non-query intents: dictionary / definition — no SQL
+            try:
+                import intent_llm
+
+                non_query = intent_llm.handle_non_query(parsed)
+            except Exception:  # noqa: BLE001
+                non_query = None
+            if non_query is not None:
+                result = non_query
+            else:
+                result = run(parsed)
 
     intent_view = display.intent_zh(result.intent) if result else None
     audit_view = display.audit_zh(result.audit) if result and result.ok else None

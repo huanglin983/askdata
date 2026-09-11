@@ -18,12 +18,19 @@ FACT_TABLE_DEFAULT = "ads_fin_tracker_comparison_summary_df"
 
 @dataclass
 class Intent:
-    metric_ids: list[str] = field(default_factory=list)  # derived or composite ids
+    metric_ids: list[str] = field(default_factory=list)  # derived / composite / atomic ids
     currency: str = "CNY"
     dims: list[str] = field(default_factory=list)  # e.g. power_plant, region
     filters: dict[str, str] = field(default_factory=dict)  # project_number=
     raw_text: str = ""
-    source: str = ""  # form | keyword | bailian — display only, not used in SQL
+    source: str = ""  # form | keyword | bailian | chatbi
+    intent_type: str = "数据查询"  # 数据查询|指标口径咨询|指标字典检索
+    include_related: bool = False
+    calc_instruction: str | None = None
+    metric_names: list[str] = field(default_factory=list)
+    related_metric_ids: list[str] = field(default_factory=list)
+    payload_zh: dict[str, Any] = field(default_factory=dict)
+    disambiguate_msg: str | None = None  # ChatBI 多指标消歧反问
 
 
 @dataclass
@@ -49,14 +56,25 @@ def _grain_field() -> str:
 
 def run(intent: Intent) -> EngineResult:
     """Full pipeline: load meta -> bind -> currency -> check -> join -> SQL -> execute."""
-    intent_dict = {
-        "metric_ids": intent.metric_ids,
-        "currency": intent.currency,
-        "dims": intent.dims,
-        "filters": intent.filters,
-        "raw_text": intent.raw_text,
-        "source": intent.source or "",
-    }
+    try:
+        from intent_llm import intent_to_engine_dict
+
+        intent_dict = intent_to_engine_dict(intent)
+    except Exception:  # noqa: BLE001
+        intent_dict = {
+            "metric_ids": intent.metric_ids,
+            "currency": intent.currency,
+            "dims": intent.dims,
+            "filters": intent.filters,
+            "raw_text": intent.raw_text,
+            "source": intent.source or "",
+            "intent_type": getattr(intent, "intent_type", "数据查询"),
+            "include_related": getattr(intent, "include_related", False),
+            "calc_instruction": getattr(intent, "calc_instruction", None),
+            "metric_names": list(getattr(intent, "metric_names", []) or []),
+            "related_metric_ids": list(getattr(intent, "related_metric_ids", []) or []),
+            "payload_zh": dict(getattr(intent, "payload_zh", {}) or {}),
+        }
     if not intent.metric_ids:
         return EngineResult(ok=False, intent=intent_dict, error="未指定指标")
 

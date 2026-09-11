@@ -23,7 +23,7 @@ Python + Flask + SQLite。语义层元数据驱动，AI/意图层只出结构化
 - 复合：同粒度四则运算（如 `(A+B)/C`）；粒度/币种校验
 - 指标地图：复合向下展开依赖树
 - 规则引擎：阶段汇率绑定、币种注入、粒度/维度校验、JOIN、复合先换算再运算
-- 问数：结构化表单，或自然语言（阿里云百炼 Intent → 失败回退关键词）→ SQL → 样例执行 → 中文审计
+- 问数：结构化表单，或自然语言（ChatBI 意图流水线：词典 Mapper + 百炼/规则兜底 + 校验消歧；失败回退旧百炼/关键词；关联指标按血缘展开）→ SQL 或元数据说明
 
 ## 启动
 
@@ -51,7 +51,7 @@ python -m venv .venv
 | `DASHSCOPE_API_KEY` | 百炼 API Key（未配置则只用关键词） |
 | `DASHSCOPE_BASE_URL` | OpenAI 兼容地址，如 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` |
 | `DASHSCOPE_MODEL` | 默认 `qwen-plus` |
-| `INTENT_PROVIDER` | `auto`（默认）/ `bailian` / `keyword` |
+| `INTENT_PROVIDER` | `auto`（默认，ChatBI 主链路）/ `chatbi` / `bailian` / `keyword` |
 
 密钥放在本地 `.env`（已 gitignore），勿提交仓库。模型只输出 Intent JSON，SQL 仍由规则引擎生成。
 
@@ -64,9 +64,9 @@ python -m venv .venv
 ## 目录
 
 ```text
-app.py / db.py / engine.py / intent.py / intent_llm.py / display.py
+app.py / db.py / engine.py / intent.py / intent_chatbi.py / intent_llm.py / display.py
 meta.py / biz_arch.py / metric_sql.py / metric_map.py
-templates/  static/  data/  doc/  requirements.txt  .env.example
+chatbi/  templates/  static/  data/  doc/  requirements.txt  .env.example
 ```
 
 ## 边界

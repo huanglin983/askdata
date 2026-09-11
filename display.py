@@ -15,14 +15,16 @@ CURRENCY_CN = {
 
 SOURCE_CN = {
     "form": "结构化表单",
-    "keyword": "关键词",
-    "bailian": "阿里云百炼",
+    "keyword": "关键词回退",
+    "bailian": "LLM结构化抽取",
+    "chatbi": "ChatBI意图流水线",
 }
 
 TYPE_CN = {
     "derived": "派生指标",
     "composite": "复合指标",
     "atomic": "原子指标",
+    "dict": "指标字典",
 }
 
 
@@ -31,6 +33,9 @@ def _metric_name(mid: str) -> str:
     if row:
         return row["name"]
     row = db.get_composite(mid) or db.get_composite_by_name(mid)
+    if row:
+        return row["name"]
+    row = db.get_atomic(mid) or db.get_atomic_by_name(mid)
     if row:
         return row["name"]
     return mid
@@ -44,19 +49,39 @@ def _dim_name(code: str) -> str:
 def intent_zh(intent: dict[str, Any] | None) -> dict[str, Any]:
     if not intent:
         return {}
+    # Prefer canonical Chinese payload from LLM / form / keyword
+    payload = intent.get("payload_zh")
+    if isinstance(payload, dict) and payload:
+        out = dict(payload)
+        # ensure 意图来源 display
+        src = intent.get("source") or ""
+        if not out.get("意图来源"):
+            out["意图来源"] = SOURCE_CN.get(src, src or "—")
+        return out
+
     filters = intent.get("filters") or {}
     filters_zh = {}
     for k, v in filters.items():
         filters_zh[_dim_name(k) if k != "project_number" else "项目编号"] = v
     src = intent.get("source") or ""
-    return {
+    names = intent.get("metric_names") or [
+        _metric_name(m) for m in intent.get("metric_ids") or []
+    ]
+    out = {
         "意图来源": SOURCE_CN.get(src, src or "—"),
-        "指标": [_metric_name(m) for m in intent.get("metric_ids") or []],
+        "意图类型": intent.get("intent_type") or "数据查询",
+        "指标": names,
         "币种": CURRENCY_CN.get(intent.get("currency", ""), intent.get("currency")),
         "分析维度": [_dim_name(c) for c in intent.get("dims") or []],
         "筛选条件": filters_zh,
+        "计算指令": intent.get("calc_instruction"),
+        "是否查询关联指标": bool(intent.get("include_related")),
         "原始问句": intent.get("raw_text") or "",
     }
+    if intent.get("include_related") and intent.get("related_metric_ids"):
+        out["关联指标"] = [_metric_name(m) for m in intent["related_metric_ids"]]
+    return out
+
 
 
 def _audit_one_zh(item: dict[str, Any]) -> dict[str, Any]:

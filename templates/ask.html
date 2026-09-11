@@ -3,12 +3,12 @@
 {% block content %}
 <div class="card">
   <h1>问数 Demo</h1>
-  <p class="muted">意图层可用结构化表单，或自然语言（优先阿里云百炼解析 Intent；无 Key / 失败时回退关键词）。规则引擎负责生成 SQL 并在样例库执行。</p>
+  <p class="muted">自然语言优先走 ChatBI 意图流水线（词典 Mapper + 百炼/规则兜底 + 元数据校验）；失败再回退旧百炼或关键词。支持数据查询、口径咨询、指标字典；多指标消歧反问；关联指标按血缘展开。</p>
 
   <form method="post">
     <div class="tabs">
       <label><input type="radio" name="mode" value="form" {% if form.mode=='form' %}checked{% endif %}> 结构化表单</label>
-      <label><input type="radio" name="mode" value="text" {% if form.mode=='text' %}checked{% endif %}> 自然语言（百炼 / 回退关键词）</label>
+      <label><input type="radio" name="mode" value="text" {% if form.mode=='text' %}checked{% endif %}> 自然语言（ChatBI / 回退）</label>
     </div>
 
     <label>自然语言（「自然语言」模式时解析；表单模式可作备注）</label>
@@ -62,18 +62,25 @@
   <h2>① 意图解析</h2>
   <table>
     <tbody>
-      <tr><th style="width:8rem">意图来源</th><td>{{ intent_view['意图来源'] }}</td></tr>
-      <tr><th>指标</th><td>{{ intent_view['指标'] | join('、') or '—' }}</td></tr>
-      <tr><th>币种</th><td>{{ intent_view['币种'] }}</td></tr>
-      <tr><th>分析维度</th><td>{{ intent_view['分析维度'] | join('、') or '无' }}</td></tr>
+      <tr><th style="width:9rem">意图来源</th><td>{{ intent_view.get('意图来源', '—') }}</td></tr>
+      <tr><th>意图类型</th><td>{{ intent_view.get('意图类型', '—') }}</td></tr>
+      <tr><th>指标</th><td>{{ intent_view.get('指标', []) | join('、') or '—' }}</td></tr>
+      {% if intent_view.get('关联指标') %}
+      <tr><th>关联指标</th><td>{{ intent_view.get('关联指标') | join('、') }}</td></tr>
+      {% endif %}
+      <tr><th>币种</th><td>{{ intent_view.get('币种') or '—' }}</td></tr>
+      <tr><th>分析维度</th><td>{{ intent_view.get('分析维度', []) | join('、') or '无' }}</td></tr>
       <tr><th>筛选条件</th>
         <td>
-          {% if intent_view['筛选条件'] %}
-            {% for k,v in intent_view['筛选条件'].items() %}{{ k }} = {{ v }}{% if not loop.last %}；{% endif %}{% endfor %}
+          {% set filters = intent_view.get('筛选条件') or {} %}
+          {% if filters %}
+            {% for k,v in filters.items() %}{{ k }} = {{ v }}{% if not loop.last %}；{% endif %}{% endfor %}
           {% else %}无{% endif %}
         </td>
       </tr>
-      <tr><th>原始问句</th><td>{{ intent_view['原始问句'] or '—' }}</td></tr>
+      <tr><th>计算指令</th><td>{{ intent_view.get('计算指令') if intent_view.get('计算指令') is not none else '—' }}</td></tr>
+      <tr><th>是否查询关联指标</th><td>{{ '是' if intent_view.get('是否查询关联指标') else '否' }}</td></tr>
+      <tr><th>原始问句</th><td>{{ intent_view.get('原始问句') or '—' }}</td></tr>
     </tbody>
   </table>
   <details style="margin-top:0.8rem">
@@ -87,10 +94,19 @@
   <p class="err-box is-err">错误：{{ result.error }}</p>
 </div>
 {% else %}
+  {% if result.sql %}
 <div class="card">
   <h2>② 生成 SQL</h2>
   <pre class="sql">{{ result.sql }}</pre>
 </div>
+  {% else %}
+<div class="card">
+  <h2>② 说明</h2>
+  <p class="muted">当前意图类型为「{{ intent_view.get('意图类型') }}」，不生成业务 SQL，仅返回口径或字典信息。</p>
+</div>
+  {% endif %}
+
+  {% if audit_view %}
 <div class="card">
   <h2>③ 口径 / 汇率审计</h2>
   {% for a in audit_view %}
@@ -123,8 +139,11 @@
     <pre class="json">{{ audit_view | zh_json }}</pre>
   </details>
 </div>
+  {% endif %}
+
+  {% if result.columns %}
 <div class="card">
-  <h2>④ 执行结果</h2>
+  <h2>④ {% if intent_view.get('意图类型') == '指标字典检索' %}字典结果{% else %}执行结果{% endif %}</h2>
   <table>
     <thead>
       <tr>{% for c in col_headers %}<th>{{ c }}</th>{% endfor %}</tr>
@@ -138,6 +157,7 @@
     </tbody>
   </table>
 </div>
+  {% endif %}
 {% endif %}
 {% endif %}
 {% endblock %}
