@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}指标规则引擎 Demo{% endblock %}</title>
+  <title>{% block title %}指标规则引擎 {% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -12,8 +12,7 @@
     <div>
       <a href="{{ url_for('index') }}">首页</a>
       <a href="{{ url_for('biz_arch_view') }}">业务架构</a>
-      <a href="{{ url_for('meta_table_list') }}">元数据</a>
-      <a href="{{ url_for('meta_rel_list') }}">维度关系</a>
+      <a href="{{ url_for('meta_table_list') }}">元数据</a> 
       <a href="{{ url_for('metrics_hub') }}">指标管理</a>
       <a href="{{ url_for('metric_map_view') }}">指标地图</a>
       <a href="{{ url_for('ask') }}">问数 Demo</a>
