@@ -70,13 +70,38 @@ table.compact td {
   line-height: 1.35;
 }
 table.compact td.actions {
-  overflow: visible;
-  white-space: nowrap;
-  width: 5.5rem;
-}
-table.compact td.actions .actions,
-table.compact .actions {
+  display: flex;
   flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  width: 15rem;
+  min-width: 15rem;
+  max-width: 15rem;
+  vertical-align: middle;
+}
+table.compact td.actions > a,
+table.compact td.actions > form {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin: 0;
+}
+table.compact td.actions button.danger {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+.metric-search input[type="search"] {
+  max-width: 220px;
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+}
+.metric-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-top: 0.5rem;
 }
 table.compact code {
   font-size: 0.82rem;
@@ -604,6 +629,11 @@ pre.sql, pre.json {
 .map-type-composite .map-card-hd { background: #ecfdf5; border-bottom-color: #d1fae5; }
 .map-type-derived .map-card-hd { background: #eef2ff; border-bottom-color: #e0e7ff; }
 .map-type-atomic .map-card-hd { background: #ede9fe; border-bottom-color: #e9e5f5; }
+.map-type-line .map-card-hd { background: #fef3c7; border-bottom-color: #fde68a; }
+.map-type-domain .map-card-hd { background: #ffedd5; border-bottom-color: #fed7aa; }
+.map-type-object .map-card-hd { background: #ecfeff; border-bottom-color: #a5f3fc; }
+.map-type-process .map-card-hd { background: #f0fdf4; border-bottom-color: #bbf7d0; }
+.map-type-unclassified .map-card-hd { background: #f3f4f6; border-bottom-color: #e5e7eb; }
 .map-card-titles { flex: 1; min-width: 0; }
 .map-card-name {
   font-weight: 700;
@@ -632,6 +662,11 @@ pre.sql, pre.json {
 .map-type-composite .map-badge { color: #0f766e; border-color: #99f6e4; }
 .map-type-derived .map-badge { color: #3730a3; border-color: #c7d2fe; }
 .map-type-atomic .map-badge { color: #5b21b6; border-color: #ddd6fe; }
+.map-type-line .map-badge { color: #92400e; border-color: #fcd34d; }
+.map-type-domain .map-badge { color: #9a3412; border-color: #fdba74; }
+.map-type-object .map-badge { color: #155e75; border-color: #67e8f9; }
+.map-type-process .map-badge { color: #166534; border-color: #86efac; }
+.map-type-unclassified .map-badge { color: #4b5563; border-color: #d1d5db; }
 .map-card-bd {
   padding: 0.55rem 0.75rem 0.7rem;
   background: #fff;
@@ -707,15 +742,18 @@ pre.sql, pre.json {
 }
 
 /* Focus / lineage highlight */
-.map-canvas.is-focusing .map-card {
+.map-canvas.is-focusing .map-card,
+.map-panel-body.is-focusing .map-card {
   opacity: 0.28;
   filter: grayscale(0.75);
 }
-.map-canvas.is-focusing .map-card.is-related {
+.map-canvas.is-focusing .map-card.is-related,
+.map-panel-body.is-focusing .map-card.is-related {
   opacity: 1;
   filter: none;
 }
-.map-canvas.is-focusing .map-card.is-active {
+.map-canvas.is-focusing .map-card.is-active,
+.map-panel-body.is-focusing .map-card.is-active {
   opacity: 1;
   filter: none;
   border-color: #0f766e;
@@ -724,18 +762,27 @@ pre.sql, pre.json {
 .map-canvas.is-focusing .org-tree li::before,
 .map-canvas.is-focusing .org-tree li::after,
 .map-canvas.is-focusing .org-tree ul::before,
-.map-canvas.is-focusing .org-tree li > .map-card::before {
+.map-canvas.is-focusing .org-tree li > .map-card::before,
+.map-panel-body.is-focusing .org-tree li::before,
+.map-panel-body.is-focusing .org-tree li::after,
+.map-panel-body.is-focusing .org-tree ul::before,
+.map-panel-body.is-focusing .org-tree li > .map-card::before {
   border-color: #d1d5db;
   opacity: 0.35;
 }
 .map-canvas.is-focusing .org-tree li.on-path::before,
 .map-canvas.is-focusing .org-tree li.on-path::after,
 .map-canvas.is-focusing .org-tree li.on-path > .map-card::before,
-.map-canvas.is-focusing .org-tree li.on-path > ul::before {
+.map-canvas.is-focusing .org-tree li.on-path > ul::before,
+.map-panel-body.is-focusing .org-tree li.on-path::before,
+.map-panel-body.is-focusing .org-tree li.on-path::after,
+.map-panel-body.is-focusing .org-tree li.on-path > .map-card::before,
+.map-panel-body.is-focusing .org-tree li.on-path > ul::before {
   border-color: #0f766e;
   opacity: 1;
 }
-.map-canvas.is-focusing .org-tree li.on-path > .map-card::before {
+.map-canvas.is-focusing .org-tree li.on-path > .map-card::before,
+.map-panel-body.is-focusing .org-tree li.on-path > .map-card::before {
   border-left-color: transparent;
   border-right-color: transparent;
   border-top-color: #0f766e;
@@ -749,6 +796,82 @@ pre.sql, pre.json {
 }
 .orphan-item { max-width: 100%; }
 .orphan-mini .org-wrap { padding-bottom: 0.25rem; }
+
+.map-canvas.is-search-hidden,
+.orphan-item.is-search-hidden {
+  display: none !important;
+}
+.map-card.is-search-hit {
+  outline: 2px solid #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
+}
+.map-card.is-search-miss {
+  opacity: 0.38;
+}
+
+/* Metric map overlay panel */
+body.map-panel-open { overflow: hidden; }
+.map-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.map-panel[hidden] { display: none !important; }
+.map-panel-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+.map-panel-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(1100px, 96vw);
+  max-height: min(90vh, 860px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+.map-panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+.map-panel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem 1rem;
+}
+.map-panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.map-panel-viewport {
+  flex: 1 1 auto;
+  min-height: 360px;
+  max-height: calc(90vh - 160px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle, #d1d5db 1px, transparent 1px) 0 0 / 18px 18px,
+    #f8fafc;
+}
 
 body:has(.map-canvas) .wrap,
 body:has(.guide-canvas) .wrap {

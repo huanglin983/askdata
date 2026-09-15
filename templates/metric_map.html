@@ -1,76 +1,35 @@
 {% extends "base.html" %}
+{% from "_metric_map_macros.html" import tree_nodes, zoom_toolbar, map_card %}
 {% block title %}指标地图{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>指标地图</h1>
-  <p class="muted">
-    从复合指标向下展开到派生 / 原子，形成依赖树；未被任何树引用的指标列在「孤立指标」。
-    当前 {{ stats.trees }} 棵树 · {{ stats.orphans }} 个孤立 ·
-    复合 {{ stats.composite }} / 派生 {{ stats.derived }} / 原子 {{ stats.atomic }}
-  </p>
-  <p class="muted" style="margin:0.4rem 0 0">
-    点击指标卡可高亮上下游；空白处拖动画布平移；节点可折叠 / 展开；右上角缩放（或 Ctrl + 滚轮）。
-  </p>
+  <div class="actions" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.75rem">
+    <div>
+      <h1 style="margin:0">指标地图</h1>
+      <p class="muted" style="margin:0.35rem 0 0">
+        根节点为<strong>业务线 → 主题域 → 业务对象 → 业务过程</strong>，其下挂载全部复合 / 派生指标并展开到原子；
+        未被依赖树引用的<strong>原子</strong>指标列在「孤立指标」。
+        当前 {{ stats.trees }} 棵树 · {{ stats.orphans }} 个孤立 ·
+        复合 {{ stats.composite }} / 派生 {{ stats.derived }} / 原子 {{ stats.atomic }}
+      </p>
+      <p class="muted" style="margin:0.35rem 0 0">
+        点击指标卡可高亮上下游；空白处拖动画布平移；节点可折叠 / 展开；右上角缩放（或 Ctrl + 滚轮）。
+      </p>
+    </div>
+    <form class="actions metric-search" id="map-search-form" onsubmit="return false;">
+      <input type="search" id="map-search" value="{{ q or '' }}" placeholder="查询：名称 / ID / 影响因子…" aria-label="指标地图查询" autocomplete="off">
+      <button type="button" class="secondary" id="map-search-btn">查询</button>
+      <button type="button" class="secondary" id="map-search-clear" {% if not q %}hidden{% endif %}>清除</button>
+    </form>
+  </div>
+  <p class="muted" id="map-search-status" style="margin:0.5rem 0 0" hidden></p>
 </div>
-
-{% macro map_card(node, has_children=false) %}
-  {% set edit_ep = {
-    'atomic': 'atomic_edit',
-    'derived': 'derived_edit',
-    'composite': 'composite_edit'
-  }[node.type] %}
-  <div class="map-card map-type-{{ node.type }}" data-metric-id="{{ node.id }}" tabindex="0" role="button">
-    <div class="map-card-hd">
-      <div class="map-card-titles">
-        <div class="map-card-name">{{ node.name }}</div>
-        <div class="map-card-id">{{ node.id }}</div>
-      </div>
-      <span class="map-badge">{{ node.type_label }}</span>
-    </div>
-    <div class="map-card-bd">
-      <div class="map-card-label">影响因子</div>
-      <div class="map-card-detail">{% if node.detail %}{{ node.detail }}{% else %}—{% endif %}</div>
-      <a class="map-card-edit" href="{{ url_for(edit_ep, metric_id=node.id) }}" onclick="event.stopPropagation()">编辑</a>
-    </div>
-    <span class="map-port map-port-t" aria-hidden="true"></span>
-    <span class="map-port map-port-b" aria-hidden="true"></span>
-    <span class="map-port map-port-l" aria-hidden="true"></span>
-    <span class="map-port map-port-r" aria-hidden="true"></span>
-    {% if has_children %}
-    <button type="button" class="map-toggle" aria-expanded="true" title="折叠子树" aria-label="折叠子树">−</button>
-    {% endif %}
-  </div>
-{% endmacro %}
-
-{% macro tree_nodes(nodes) %}
-  {% for node in nodes %}
-  {% set kids = node.children or [] %}
-  {% set has_kids = kids|length > 0 %}
-  <li data-metric-id="{{ node.id }}"{% if has_kids %} class="has-children"{% endif %}>
-    {{ map_card(node, has_children=has_kids) }}
-    {% if has_kids %}
-    <ul>
-      {{ tree_nodes(kids) }}
-    </ul>
-    {% endif %}
-  </li>
-  {% endfor %}
-{% endmacro %}
-
-{% macro zoom_toolbar() %}
-  <div class="map-zoom-toolbar" role="group" aria-label="画布缩放">
-    <button type="button" class="map-zoom-btn" data-zoom="out" title="缩小" aria-label="缩小">−</button>
-    <span class="map-zoom-label" data-zoom-label>100%</span>
-    <button type="button" class="map-zoom-btn" data-zoom="in" title="放大" aria-label="放大">+</button>
-    <button type="button" class="map-zoom-btn map-zoom-fit" data-zoom="fit" title="最佳大小" aria-label="最佳大小">最佳大小</button>
-  </div>
-{% endmacro %}
 
 {% if trees %}
 {% for tree in trees %}
-<div class="card map-canvas" data-map-scope="tree">
+<div class="card map-canvas" data-map-scope="tree" data-tree-id="{{ tree.id }}" data-tree-name="{{ tree.name }}">
   <div class="map-canvas-hd">
-    <h2 class="map-section-title">依赖树 · {{ tree.name }}</h2>
+    <h2 class="map-section-title">{% if tree.type in ['line','domain','object','process'] %}业务架构 · {{ tree.name }}{% elif tree.type == 'unclassified' %}未分类指标{% else %}依赖树 · {{ tree.name }}{% endif %}</h2>
     {{ zoom_toolbar() }}
   </div>
   <div class="map-viewport">
@@ -88,17 +47,17 @@
 {% endfor %}
 {% else %}
 <div class="card">
-  <p class="muted">暂无复合指标树。请先配置复合指标及其子指标依赖。</p>
+  <p class="muted">暂无业务架构树或复合 / 派生指标。请先维护业务架构，并配置指标的业务线 / 主题域 / 业务对象 / 业务过程。</p>
 </div>
 {% endif %}
 
 <div class="card map-canvas" data-map-scope="orphan">
   <h2 class="map-section-title">孤立指标</h2>
   {% if orphans %}
-  <p class="muted" style="margin-top:0">未被上述依赖树引用的指标（派生若仅自身孤立，仍可展示其下挂原子）。</p>
+  <p class="muted" style="margin-top:0">未被上述依赖树引用的原子指标（派生指标不列入孤立）。</p>
   <div class="orphan-grid">
     {% for node in orphans %}
-    <div class="orphan-item">
+    <div class="orphan-item" data-metric-id="{{ node.id }}" data-metric-name="{{ node.name }}">
       {% if node.children %}
       <div class="org-wrap orphan-mini">
         <ul class="org-tree">
@@ -112,8 +71,22 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="muted">无孤立指标，全部已纳入依赖树。</p>
+  <p class="muted">无孤立指标，全部已纳入依赖树或仅为派生（派生不展示为孤立）。</p>
   {% endif %}
+</div>
+
+{# Overlay panel for「查看地图」 #}
+<div class="map-panel" id="map-panel" hidden aria-hidden="true">
+  <div class="map-panel-backdrop" data-map-panel-close></div>
+  <div class="map-panel-dialog" role="dialog" aria-modal="true" aria-labelledby="map-panel-title">
+    <div class="map-panel-hd">
+      <h2 id="map-panel-title" style="margin:0;font-size:1.05rem">指标依赖地图</h2>
+      <button type="button" class="secondary map-panel-close" data-map-panel-close aria-label="关闭" id="map-panel-close-btn">关闭</button>
+    </div>
+    <div class="map-panel-content" id="map-panel-content">
+      <p class="muted">加载中…</p>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -121,6 +94,7 @@
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 2;
   const ZOOM_STEP = 0.1;
+  const PANEL_URL_PREFIX = '/metrics/map/panel/';
 
   function clearFocus(scope) {
     scope.classList.remove('is-focusing');
@@ -152,7 +126,7 @@
   }
 
   function focusCard(card) {
-    const scope = card.closest('.map-canvas');
+    const scope = card.closest('.map-canvas, .map-panel-body');
     if (!scope) return;
     const metricId = card.getAttribute('data-metric-id');
     const already = card.classList.contains('is-active') && scope.classList.contains('is-focusing');
@@ -182,7 +156,7 @@
         const li = btn.closest('li');
         if (!li) return;
         setCollapsed(li, !li.classList.contains('is-collapsed'));
-        const canvas = scope.closest('.map-canvas') || scope;
+        const canvas = scope.closest('.map-canvas, .map-panel-body') || scope;
         if (canvas._mapZoom) canvas._mapZoom.refreshShell();
       });
     });
@@ -205,7 +179,6 @@
     }
 
     function refreshShell() {
-      // Measure unscaled size, then shrink shell so scrollbars match visual bounds
       const w = inner.scrollWidth;
       const h = inner.scrollHeight;
       const scaledW = Math.ceil(w * scale);
@@ -217,14 +190,12 @@
 
     function fit() {
       applyScale(1);
-      // Wait a frame so layout reflects expanded/collapsed state at 100%
       requestAnimationFrame(() => {
         const pad = 24;
         const vw = Math.max(viewport.clientWidth - pad, 80);
         const vh = Math.max(viewport.clientHeight - pad, 80);
         const tw = inner.scrollWidth || 1;
         const th = inner.scrollHeight || 1;
-        // Fit without enlarging past 100%
         const next = Math.min(vw / tw, vh / th, 1);
         applyScale(Math.max(next, ZOOM_MIN));
         viewport.scrollLeft = Math.max(0, (shell.offsetWidth - viewport.clientWidth) / 2);
@@ -243,19 +214,17 @@
       });
     });
 
-    // Ctrl + wheel zoom inside viewport
     viewport.addEventListener('wheel', (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       applyScale(scale + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
     }, { passive: false });
 
-    // Drag to pan canvas
     const DRAG_THRESHOLD = 4;
     let drag = null;
 
     function isPanBlockedTarget(t) {
-      return !!(t && t.closest && t.closest('.map-toggle, .map-zoom-toolbar, .map-zoom-btn, a.map-card-edit'));
+      return !!(t && t.closest && t.closest('.map-toggle, .map-zoom-toolbar, .map-zoom-btn, a.map-card-edit, .map-panel-close'));
     }
 
     viewport.addEventListener('pointerdown', (e) => {
@@ -293,7 +262,6 @@
       drag = null;
       viewport.classList.remove('is-panning');
       if (wasMoved) {
-        // Suppress the click that follows a drag (card focus / clear)
         viewport._suppressClickUntil = Date.now() + 280;
       }
     }
@@ -303,15 +271,16 @@
     viewport.addEventListener('lostpointercapture', endPan);
 
     applyScale(1);
-    // Initial fit so wide trees are usable immediately
     requestAnimationFrame(fit);
 
     return { applyScale, fit, refreshShell, get scale() { return scale; } };
   }
 
-  document.querySelectorAll('.map-canvas').forEach(scope => {
+  function bindCanvasInteractions(scope) {
     initCollapse(scope);
-    if (scope.getAttribute('data-map-scope') === 'tree') {
+    const isTree = scope.getAttribute('data-map-scope') === 'tree'
+      || scope.getAttribute('data-map-scope') === 'panel';
+    if (isTree) {
       scope._mapZoom = createZoomController(scope);
     }
 
@@ -331,19 +300,209 @@
       }
       if (!e.target.closest('.map-card')) clearFocus(scope);
     });
+  }
+
+  document.querySelectorAll('.map-canvas').forEach(bindCanvasInteractions);
+
+  /* ---- Search ---- */
+  const searchInput = document.getElementById('map-search');
+  const searchStatus = document.getElementById('map-search-status');
+  const clearBtn = document.getElementById('map-search-clear');
+
+  function cardHaystack(card) {
+    return [
+      card.getAttribute('data-metric-id') || '',
+      card.getAttribute('data-metric-name') || '',
+      (card.querySelector('.map-card-detail') || {}).textContent || '',
+      (card.querySelector('.map-badge') || {}).textContent || '',
+    ].join(' ').toLowerCase();
+  }
+
+  function applySearch(q) {
+    const needle = (q || '').trim().toLowerCase();
+    let hitCards = 0;
+    let hitTrees = 0;
+
+    document.querySelectorAll('.map-canvas[data-map-scope="tree"]').forEach(canvas => {
+      let treeHit = !needle;
+      canvas.querySelectorAll('.map-card').forEach(card => {
+        const ok = !needle || cardHaystack(card).includes(needle);
+        card.classList.toggle('is-search-hit', !!(needle && ok));
+        card.classList.toggle('is-search-miss', !!(needle && !ok));
+        if (ok && needle) {
+          hitCards += 1;
+          treeHit = true;
+        }
+      });
+      canvas.classList.toggle('is-search-hidden', !!(needle && !treeHit));
+      if (treeHit && needle) hitTrees += 1;
+      if (canvas._mapZoom) canvas._mapZoom.refreshShell();
+    });
+
+    document.querySelectorAll('.orphan-item').forEach(item => {
+      const cards = item.querySelectorAll('.map-card');
+      let ok = !needle;
+      cards.forEach(card => {
+        const match = !needle || cardHaystack(card).includes(needle);
+        card.classList.toggle('is-search-hit', !!(needle && match));
+        card.classList.toggle('is-search-miss', !!(needle && !match));
+        if (match) ok = true;
+      });
+      if (!cards.length) {
+        const hay = ((item.getAttribute('data-metric-id') || '') + ' ' + (item.getAttribute('data-metric-name') || '')).toLowerCase();
+        ok = !needle || hay.includes(needle);
+      }
+      item.classList.toggle('is-search-hidden', !!(needle && !ok));
+      if (ok && needle) hitCards += 1;
+    });
+
+    if (clearBtn) clearBtn.hidden = !needle;
+    if (searchStatus) {
+      if (!needle) {
+        searchStatus.hidden = true;
+        searchStatus.textContent = '';
+      } else {
+        searchStatus.hidden = false;
+        searchStatus.textContent = '匹配 ' + hitCards + ' 个指标 · ' + hitTrees + ' 棵业务树可见';
+      }
+    }
+
+    // Update URL without reload
+    try {
+      const url = new URL(window.location.href);
+      if (needle) url.searchParams.set('q', q.trim());
+      else url.searchParams.delete('q');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch (_) {}
+  }
+
+  document.getElementById('map-search-btn').addEventListener('click', () => applySearch(searchInput.value));
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applySearch(searchInput.value);
+    }
+  });
+  clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    applySearch('');
+  });
+  if (searchInput.value) applySearch(searchInput.value);
+
+  /* ---- Panel overlay ---- */
+  const panel = document.getElementById('map-panel');
+  const panelContent = document.getElementById('map-panel-content');
+  const panelTitle = document.getElementById('map-panel-title');
+  const panelCloseBtn = document.getElementById('map-panel-close-btn');
+
+  /** Only allow same-origin relative paths (open-redirect safe). */
+  function safeReturnUrl(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const s = raw.trim();
+    if (!s.startsWith('/') || s.startsWith('//')) return null;
+    if (s.includes('://') || s.includes('\\')) return null;
+    return s;
+  }
+
+  function getReturnUrl() {
+    try {
+      return safeReturnUrl(new URL(window.location.href).searchParams.get('next'));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function syncCloseLabel() {
+    if (!panelCloseBtn) return;
+    panelCloseBtn.textContent = getReturnUrl() ? '返回列表' : '关闭';
+  }
+
+  function closePanel() {
+    if (!panel) return;
+    const next = getReturnUrl();
+    if (next) {
+      window.location.href = next;
+      return;
+    }
+    panel.hidden = true;
+    panel.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('map-panel-open');
+    panelContent.innerHTML = '<p class="muted">加载中…</p>';
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('panel');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch (_) {}
+    syncCloseLabel();
+  }
+
+  async function openPanel(metricId) {
+    if (!panel || !metricId) return;
+    panel.hidden = false;
+    panel.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('map-panel-open');
+    panelContent.innerHTML = '<p class="muted">加载中…</p>';
+    panelTitle.textContent = '指标依赖地图';
+    syncCloseLabel();
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('panel', metricId);
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch (_) {}
+
+    try {
+      const resp = await fetch(PANEL_URL_PREFIX + encodeURIComponent(metricId), {
+        headers: { 'Accept': 'text/html' }
+      });
+      const html = await resp.text();
+      if (!resp.ok) {
+        panelContent.innerHTML = '<p class="err-box is-err">' + (html || '加载失败') + '</p>';
+        return;
+      }
+      panelContent.innerHTML = html;
+      const body = panelContent.querySelector('.map-panel-body');
+      if (body) {
+        bindCanvasInteractions(body);
+        const rootName = (body.querySelector('.map-section-title') || {}).textContent;
+        if (rootName) {
+          const rev = body.getAttribute('data-reverse');
+          panelTitle.textContent = (rev ? '反向引用 · ' : '地图 · ') + rootName;
+        }
+      }
+    } catch (e) {
+      panelContent.innerHTML = '<p class="err-box is-err">请求失败：' + e + '</p>';
+    }
+  }
+
+  panel.querySelectorAll('[data-map-panel-close]').forEach(el => {
+    el.addEventListener('click', closePanel);
   });
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      document.querySelectorAll('.map-canvas.is-focusing').forEach(clearFocus);
+      if (panel && !panel.hidden) {
+        closePanel();
+        return;
+      }
+      document.querySelectorAll('.map-canvas.is-focusing, .map-panel-body.is-focusing').forEach(clearFocus);
     }
   });
 
   window.addEventListener('resize', () => {
-    document.querySelectorAll('.map-canvas').forEach(c => {
+    document.querySelectorAll('.map-canvas, .map-panel-body').forEach(c => {
       if (c._mapZoom) c._mapZoom.refreshShell();
     });
   });
+
+  // Auto-open panel from ?panel=
+  try {
+    const panelId = new URL(window.location.href).searchParams.get('panel');
+    if (panelId) openPanel(panelId);
+    else syncCloseLabel();
+  } catch (_) {}
+
+  // Expose for list-page deep links already on this page
+  window.__openMetricMapPanel = openPanel;
 })();
 </script>
 {% endblock %}

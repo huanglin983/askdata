@@ -42,6 +42,58 @@ def _dim_form_context(metric_type: str | None = None, metric_id: str | None = No
     return dims, selected
 
 
+def _metric_kw_match(row, q: str, fields: tuple[str, ...]) -> bool:
+    """Case-insensitive substring match on any of the given row fields."""
+    needle = (q or "").strip().lower()
+    if not needle:
+        return True
+    for f in fields:
+        try:
+            val = row[f]
+        except (KeyError, IndexError, TypeError):
+            continue
+        if val is not None and needle in str(val).lower():
+            return True
+    return False
+
+
+_ATOMIC_SEARCH_FIELDS = (
+    "id",
+    "name",
+    "name_en",
+    "source_field",
+    "source_table",
+    "stage_type",
+    "rate_col",
+    "biz_line",
+    "theme_domain",
+    "biz_object",
+    "biz_process",
+    "agg_type",
+)
+_DERIVED_SEARCH_FIELDS = (
+    "id",
+    "name",
+    "atomic_id",
+    "stage_type",
+    "amount_col",
+    "rate_col",
+    "biz_line",
+    "theme_domain",
+    "biz_object",
+    "biz_process",
+)
+_COMPOSITE_SEARCH_FIELDS = (
+    "id",
+    "name",
+    "formula",
+    "biz_line",
+    "theme_domain",
+    "biz_object",
+    "biz_process",
+)
+
+
 @app.route("/")
 def index():
     return render_template(
@@ -363,12 +415,15 @@ def meta_rel_delete(rel_id: str):
 # ---------- Atomic ----------
 @app.route("/metrics/atomic")
 def atomic_list():
+    q = (request.args.get("q") or "").strip()
     rows = []
     for r in db.list_atomic():
+        if not _metric_kw_match(r, q, _ATOMIC_SEARCH_FIELDS):
+            continue
         d = dict(r)
         d["dim_labels"] = db.metric_bound_dim_labels("atomic", r["id"])
         rows.append(d)
-    return render_template("atomic_list.html", rows=rows)
+    return render_template("atomic_list.html", rows=rows, q=q)
 
 
 @app.route("/metrics/atomic/edit", methods=["GET", "POST"])
@@ -475,27 +530,48 @@ def atomic_delete(metric_id: str):
 # ---------- Derived ----------
 @app.route("/metrics/derived")
 def derived_list():
+    q = (request.args.get("q") or "").strip()
     rows = []
     for r in db.list_derived():
+        if not _metric_kw_match(r, q, _DERIVED_SEARCH_FIELDS):
+            continue
         d = dict(r)
         d["dim_labels"] = db.metric_bound_dim_labels("derived", r["id"])
         rows.append(d)
-    return render_template("derived_list.html", rows=rows)
+    return render_template("derived_list.html", rows=rows, q=q)
 
 
 @app.route("/metrics/derived/edit", methods=["GET", "POST"])
 @app.route("/metrics/derived/edit/<metric_id>", methods=["GET", "POST"])
 def derived_edit(metric_id: str | None = None):
     row = db.get_derived(metric_id) if metric_id else None
+    from_atomic = (request.args.get("from_atomic") or "").strip() if not metric_id else ""
+    prefill_atomic_id = ""
+    prefill_name = ""
+    seed_atom = db.get_atomic(from_atomic) if from_atomic else None
+    if from_atomic and not seed_atom and not row:
+        flash(f"来源原子不存在: {from_atomic}", "err")
+    if seed_atom and not row:
+        prefill_atomic_id = seed_atom["id"]
+        stage = (seed_atom["stage_type"] or "").strip()
+        prefill_name = f"{stage}总成本" if stage else (seed_atom["name"] or "")
+
     # Prefer amount atomics that already carry stage FX
     atomics = [
         a
         for a in db.list_atomic()
-        if (a["rate_col"] or a["stage_type"]) or (row and a["id"] == row["atomic_id"])
+        if (a["rate_col"] or a["stage_type"])
+        or (row and a["id"] == row["atomic_id"])
+        or (prefill_atomic_id and a["id"] == prefill_atomic_id)
     ]
     if not atomics:
         atomics = list(db.list_atomic())
     dims, selected_dims = _dim_form_context("derived", metric_id)
+    if seed_atom and not row and not metric_id:
+        # Copy binds from source atomic for faster create
+        atomic_dims = db.list_metric_dim_ids("atomic", seed_atom["id"])
+        if atomic_dims:
+            selected_dims = atomic_dims
     filter_text = metric_sql.row_filter_text(row) if row else ""
     if request.method == "POST":
         mid = request.form.get("id") or f"drv_{uuid.uuid4().hex[:8]}"
@@ -519,6 +595,8 @@ def derived_edit(metric_id: str | None = None):
         except Exception as e:  # noqa: BLE001
             flash(str(e), "err")
             selected_dims = dim_ids
+            prefill_atomic_id = request.form.get("atomic_id") or prefill_atomic_id
+            prefill_name = request.form.get("name") or prefill_name
     return render_template(
         "derived_edit.html",
         row=row,
@@ -527,6 +605,9 @@ def derived_edit(metric_id: str | None = None):
         selected_dims=selected_dims,
         filter_text=filter_text,
         currencies=db.list_currency_rules(),
+        prefill_atomic_id=prefill_atomic_id,
+        prefill_name=prefill_name,
+        from_atomic=from_atomic,
     )
 
 
@@ -606,19 +687,39 @@ def derived_delete(metric_id: str):
 # ---------- Composite ----------
 @app.route("/metrics/composite")
 def composite_list():
+    q = (request.args.get("q") or "").strip()
+    needle = q.lower()
     rows = []
     for r in db.list_composite():
         d = dict(r)
         d["subs"] = json.loads(r["sub_metric_ids"] or "[]")
         d["dim_labels"] = db.metric_bound_dim_labels("composite", r["id"])
+        if q:
+            hit = _metric_kw_match(r, q, _COMPOSITE_SEARCH_FIELDS) or any(
+                needle in str(s).lower() for s in d["subs"]
+            )
+            if not hit:
+                continue
         rows.append(d)
-    return render_template("composite_list.html", rows=rows)
+    return render_template("composite_list.html", rows=rows, q=q)
 
 
 @app.route("/metrics/composite/edit", methods=["GET", "POST"])
 @app.route("/metrics/composite/edit/<metric_id>", methods=["GET", "POST"])
 def composite_edit(metric_id: str | None = None):
     row = db.get_composite(metric_id) if metric_id else None
+    from_derived = (
+        (request.args.get("from_derived") or "").strip() if not metric_id else ""
+    )
+    seed_derived = db.get_derived(from_derived) if from_derived else None
+    prefill_formula = ""
+    prefill_name = ""
+    if from_derived and not seed_derived and not row:
+        flash(f"来源派生不存在: {from_derived}", "err")
+    if seed_derived and not row:
+        prefill_formula = seed_derived["name"] or ""
+        prefill_name = f"{seed_derived['name']}复合" if seed_derived["name"] else ""
+
     # Prefer amount atomics (with stage FX); fall back to full list
     atomics = [
         a
@@ -627,10 +728,19 @@ def composite_edit(metric_id: str | None = None):
     ]
     if not atomics:
         atomics = list(db.list_atomic())
-    derived = db.list_derived(exposed_only=True)
+    derived = list(db.list_derived(exposed_only=True))
+    # Ensure seed derived appears even if not exposed
+    if seed_derived and not any(d["id"] == seed_derived["id"] for d in derived):
+        derived = [seed_derived] + derived
     composites = [c for c in db.list_composite() if not row or c["id"] != row["id"]]
     selected = json.loads(row["sub_metric_ids"]) if row else []
+    if seed_derived and not row and not selected:
+        selected = [seed_derived["id"]]
     dims, selected_dims = _dim_form_context("composite", metric_id)
+    if seed_derived and not row and not metric_id:
+        derived_dims = db.list_metric_dim_ids("derived", seed_derived["id"])
+        if derived_dims:
+            selected_dims = derived_dims
     if request.method == "POST":
         mid = request.form.get("id") or f"cmp_{uuid.uuid4().hex[:8]}"
         subs = request.form.getlist("sub_metric_ids")
@@ -655,6 +765,9 @@ def composite_edit(metric_id: str | None = None):
             flash(str(e), "err")
             selected_dims = dim_ids
             selected = subs
+            prefill_formula = request.form.get("formula") or prefill_formula
+            prefill_name = request.form.get("name") or prefill_name
+    formula_for_tax = (row["formula"] if row else prefill_formula) or ""
     return render_template(
         "composite_edit.html",
         row=row,
@@ -665,11 +778,11 @@ def composite_edit(metric_id: str | None = None):
         dims=dims,
         selected_dims=selected_dims,
         currencies=[c for c in db.list_currency_rules() if c["code"] != "USD"],
-        taxonomy_defaults=db.taxonomy_from_formula(
-            (row["formula"] if row else "") or "",
-            selected,
-        ),
+        taxonomy_defaults=db.taxonomy_from_formula(formula_for_tax, selected),
         biz_catalog=biz_arch.taxonomy_catalog(),
+        from_derived=from_derived,
+        prefill_formula=prefill_formula,
+        prefill_name=prefill_name,
     )
 
 
@@ -734,12 +847,23 @@ def composite_delete(metric_id: str):
 @app.route("/metrics/map")
 def metric_map_view():
     data = metric_map.build_metric_map()
+    q = (request.args.get("q") or "").strip()
     return render_template(
         "metric_map.html",
         trees=data["trees"],
         orphans=data["orphans"],
         stats=data["stats"],
+        q=q,
     )
+
+
+@app.route("/metrics/map/panel/<metric_id>")
+def metric_map_panel(metric_id: str):
+    """HTML fragment: dependency subtree for overlay panel."""
+    tree = metric_map.build_subtree(metric_id)
+    if not tree:
+        return f"指标不存在: {metric_id}", 404
+    return render_template("metric_map_panel.html", tree=tree)
 
 
 # ---------- Ask / Demo ----------

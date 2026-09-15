@@ -3,13 +3,16 @@
 {% block content %}
 <div class="card">
   <h1>{{ '编辑' if row else '新增' }}复合指标</h1>
+  {% if from_derived and not row %}
+  <p class="muted">已从来源派生预填：该派生勾选为子指标，并放在公式首位（可继续勾选其他指标或改公式）。</p>
+  {% endif %}
   <form method="post" id="composite-form">
     {% if row %}<input type="hidden" name="id" id="metric_id" value="{{ row.id }}">{% endif %}
     {% if not row %}<input type="hidden" id="metric_id" value="">{% endif %}
     <label>名称</label>
-    <input type="text" name="name" id="name" required value="{{ row.name if row else '' }}">
+    <input type="text" name="name" id="name" required value="{{ row.name if row else (prefill_name or '') }}">
     <label>公式（使用子指标中文名，支持 + - * / 与括号）</label>
-    <input type="text" name="formula" id="formula" required value="{{ row.formula if row else '' }}" placeholder="Contract原始成本 - PJ原始成本">
+    <input type="text" name="formula" id="formula" required value="{{ row.formula if row else (prefill_formula or '') }}" placeholder="Contract原始成本 - PJ原始成本">
 
     <label>业务线（引用公式首个指标，只读）</label>
     <input type="text" id="cmp_biz_line" readonly

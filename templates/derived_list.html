@@ -4,16 +4,25 @@
 {% set active = 'derived' %}
 {% include "_metric_tabs.html" %}
 <div class="card">
-  <div class="actions" style="justify-content:space-between">
+  <div class="actions" style="justify-content:space-between;align-items:flex-start">
     <div>
       <h1 style="margin:0">派生指标</h1>
       <p class="muted" style="margin:0.35rem 0 0">原子加业务切片（时间 + 修饰词维度），默认继承原子指标元数据。</p>
     </div>
-    <a class="btn" href="{{ url_for('derived_edit') }}">新增</a>
+    <div class="actions" style="flex-wrap:wrap;justify-content:flex-end">
+      <form method="get" class="actions metric-search" action="{{ url_for('derived_list') }}">
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / ID / 字段…" aria-label="关键词查询">
+        <button type="submit" class="secondary">查询</button>
+        {% if q %}<a class="btn secondary" href="{{ url_for('derived_list') }}">清除</a>{% endif %}
+      </form>
+      <a class="btn" href="{{ url_for('derived_edit') }}">新增</a>
+    </div>
   </div>
+  {% if q %}<p class="muted" style="margin:0.5rem 0 0">关键词「{{ q }}」· 共 {{ rows|length }} 条</p>{% endif %}
+  <div class="metric-table-scroll">
   <table class="compact">
     <thead>
-      <tr><th>名称</th><th>阶段</th><th>业务线</th><th>主题域</th><th>金额列</th><th>汇率列</th><th>附加过滤</th><th>绑定维度</th><th>对外</th><th></th></tr>
+      <tr><th>名称</th><th>阶段</th><th>业务线</th><th>主题域</th><th>金额列</th><th>汇率列</th><th>附加过滤</th><th>绑定维度</th><th>对外</th><th>操作</th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
@@ -29,15 +38,17 @@
         <td>{{ '是' if r.exposed else '否' }}</td>
         <td class="actions">
           <a href="{{ url_for('derived_edit', metric_id=r.id) }}">编辑</a>
+          <a href="{{ url_for('composite_edit', from_derived=r.id) }}" title="基于此派生创建复合指标（公式首位）">创建复合</a>
           <form method="post" action="{{ url_for('derived_delete', metric_id=r.id) }}" onsubmit="return confirm('删除？');">
             <button type="submit" class="danger">删</button>
           </form>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="10">暂无数据</td></tr>
+      <tr><td colspan="10">{% if q %}无匹配「{{ q }}」的派生指标{% else %}暂无数据{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

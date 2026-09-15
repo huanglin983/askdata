@@ -11,7 +11,7 @@
 | 业务架构（线/域/对象/过程） | `biz_arch.py` |
 | 原子/派生 SQL 预览与过滤安全 | `metric_sql.py` |
 | 规则引擎（汇率、币种、复合、校验、JOIN） | `engine.py` |
-| 指标依赖地图数据 | `metric_map.py` |
+| 指标依赖地图（业务架构根 + 侧栏子树） | `metric_map.py` |
 | 意图解析（表单 + ChatBI 流水线 / 百炼 / 关键词） | `intent.py` / `intent_chatbi.py` / `intent_llm.py` / `chatbi/` |
 | 中文展示（意图/审计/列名） | `display.py` |
 | Web 管理与问数 | `app.py` + `templates/` + `static/style.css` |
@@ -22,9 +22,9 @@
 | 模块 | 入口 | 说明 |
 |---|---|---|
 | 指标管理 | `/metrics` | 三类指标卡片（矢量图标 + 帮助文案 + 数量）；进入列表后用 Tab 切换 |
-| 原子 / 派生 / 复合 | `/metrics/{atomic\|derived\|composite}` | CRUD、SQL 预览、紧凑表省略展示 |
-| 指标地图 | `/metrics/map` | 复合向下展开依赖树；孤立指标单独列出 |
-| 业务架构 | `/meta/biz-arch` | 四级分类树维护 |
+| 原子 / 派生 / 复合 | `/metrics/{atomic\|derived\|composite}` | CRUD、SQL 预览、关键词 `?q=`、紧凑表；原子→创建派生、派生→创建复合快捷链 |
+| 指标地图 | `/metrics/map` | 业务线→主题域→业务对象→业务过程为根，挂载复合/派生并展开到原子；孤立原子；`?panel=` 侧栏（原子反向引用） |
+| 业务架构 | `/meta/biz-arch` | 四级分类树维护（地图骨架来源） |
 | 元数据 / 维度关系 | `/meta/tables`、`/meta/rels` | 表字段与 JOIN |
 | 问数 Demo | `/ask` | 表单或自然语言（ChatBI 主链路：Mapper+LLM/规则+校验消歧；失败回退百炼/关键词）→ 引擎执行或口径/字典 |
 
@@ -56,16 +56,20 @@
 │   ├── metrics.html          # 指标管理总览
 │   ├── _metric_tabs.html     # 列表页类型 Tab
 │   ├── atomic_*.html / derived_*.html / composite_*.html
-│   ├── meta_*.html / biz_arch*.html / metric_map.html / ask.html
+│   ├── meta_*.html / biz_arch*.html / ask.html
+│   ├── metric_map.html / metric_map_panel.html / _metric_map_macros.html
 │   └── _filters.html / _dim_bind.html
 ├── data/                     # demo.db 运行时生成，勿提交
-└── doc/                      # 本目录：方案 + 计算 + 元数据
+└── doc/                      # 本目录：方案 + 计算 + 元数据 + 需求规划
     ├── README.md
     ├── 01_技术方案.md
     ├── 02_计算与币种规则.md
     ├── 03_元数据与配置模型.md
     ├── 04_Demo实现与拆库说明.md
-    └── 05_详细设计_Flask与实现.md
+    ├── 05_详细设计_Flask与实现.md
+    ├── 06_需求规划一_Dify与问数查询服务.md
+    ├── 07_指标分层_理论配置与SQL生成.md
+    └── diagrams/             # 交互流程图等
 ```
 
 ## 4. 拆库步骤（建议）
@@ -74,7 +78,8 @@
 2. 确认根 `README.md` 仅引用 `doc/`，不依赖原旁路项目路径。
 3. `python -m venv .venv && pip install -r requirements.txt && python app.py`。
 4. 浏览器打开 `http://127.0.0.1:5050`：
-   - 顶栏进入 **指标管理**，核对三类卡片帮助文案；
+   - 顶栏进入 **指标管理**，核对三类卡片、列表关键词与「创建派生 / 创建复合」；
+   - **指标地图**确认业务架构为根、侧栏可打开；
    - **问数 Demo** 按 `doc/02` 验算 GAP=1540。
 5. （可选）删改种子数据表名/字段以对接新业务，但保留元数据表结构与引擎约束。
 

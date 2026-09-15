@@ -4,16 +4,25 @@
 {% set active = 'composite' %}
 {% include "_metric_tabs.html" %}
 <div class="card">
-  <div class="actions" style="justify-content:space-between">
+  <div class="actions" style="justify-content:space-between;align-items:flex-start">
     <div>
       <h1 style="margin:0">复合指标</h1>
       <p class="muted" style="margin:0.35rem 0 0">同粒度指标的四则运算，校验业务归属一致。如 <code>(A+B)/C</code></p>
     </div>
-    <a class="btn" href="{{ url_for('composite_edit') }}">新增</a>
+    <div class="actions" style="flex-wrap:wrap;justify-content:flex-end">
+      <form method="get" class="actions metric-search" action="{{ url_for('composite_list') }}">
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / 公式 / ID…" aria-label="关键词查询">
+        <button type="submit" class="secondary">查询</button>
+        {% if q %}<a class="btn secondary" href="{{ url_for('composite_list') }}">清除</a>{% endif %}
+      </form>
+      <a class="btn" href="{{ url_for('composite_edit') }}">新增</a>
+    </div>
   </div>
+  {% if q %}<p class="muted" style="margin:0.5rem 0 0">关键词「{{ q }}」· 共 {{ rows|length }} 条</p>{% endif %}
+  <div class="metric-table-scroll">
   <table class="compact">
     <thead>
-      <tr><th>名称</th><th>公式</th><th>业务线</th><th>业务对象</th><th>业务过程</th><th>子指标</th><th>绑定维度</th><th></th></tr>
+      <tr><th>名称</th><th>公式</th><th>业务线</th><th>业务对象</th><th>业务过程</th><th>子指标</th><th>绑定维度</th><th>操作</th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
@@ -27,15 +36,17 @@
         <td class="muted" title="{{ r.dim_labels }}">{{ r.dim_labels }}</td>
         <td class="actions">
           <a href="{{ url_for('composite_edit', metric_id=r.id) }}">编辑</a>
+          <a href="{{ url_for('metric_map_view', panel=r.id, next=request.full_path if request.query_string else request.path) }}" title="查看该复合的依赖地图">地图</a>
           <form method="post" action="{{ url_for('composite_delete', metric_id=r.id) }}" onsubmit="return confirm('删除？');">
             <button type="submit" class="danger">删</button>
           </form>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8">暂无数据</td></tr>
+      <tr><td colspan="8">{% if q %}无匹配「{{ q }}」的复合指标{% else %}暂无数据{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

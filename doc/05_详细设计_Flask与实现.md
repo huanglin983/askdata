@@ -238,7 +238,7 @@ askdata/
 ├── meta.py             # 表/字段/关系元数据；分析维度；JOIN 解析
 ├── biz_arch.py         # 业务架构四级树
 ├── metric_sql.py       # 原子/派生 SQL 预览、过滤安全、CASE 包裹
-├── metric_map.py       # 指标依赖树（复合向下展开）
+├── metric_map.py       # 指标地图：业务架构根 + 依赖/反向子树
 ├── engine.py           # 问数规则引擎：Intent → SQL → 执行 → EngineResult
 ├── intent.py           # 表单意图 / 自然语言 from_text（ChatBI 主链路）
 ├── intent_chatbi.py    # ChatBI → engine.Intent 适配；会话与能力引导
@@ -274,7 +274,7 @@ askdata/
 | `intent_llm.py` | 目录组装、DashScope、`normalize_llm_payload`、`handle_non_query`、能力引导 |
 | `chatbi/*` | Schema 实体匹配、语义抽取、校验消歧、会话、路由（不含 SQL） |
 | `display.py` | `intent_zh` / `audit_zh` / `column_zh` / `dumps_zh` |
-| `metric_map.py` | `build_metric_map()` |
+| `metric_map.py` | `build_metric_map()` / `build_subtree(metric_id)` |
 
 依赖方向（理想上）：
 
@@ -394,10 +394,10 @@ flowchart LR
 |---|---|---|---|
 | 首页 | `/` | `index` | 统计卡片 |
 | 指标中心 | `/metrics` | `metrics_hub` | 三类入口 |
-| 原子 | `/metrics/atomic...` | `atomic_*` | CRUD + preview-sql |
-| 派生 | `/metrics/derived...` | `derived_*` | CRUD + preview-sql |
-| 复合 | `/metrics/composite...` | `composite_*` | CRUD + preview-sql |
-| 指标地图 | `/metrics/map` | `metric_map_view` | 依赖树 |
+| 原子 | `/metrics/atomic...` | `atomic_*` | CRUD + preview-sql；列表 `?q=` |
+| 派生 | `/metrics/derived...` | `derived_*` | CRUD + preview-sql；列表 `?q=`；新建可 `?from_atomic=` |
+| 复合 | `/metrics/composite...` | `composite_*` | CRUD + preview-sql；列表 `?q=`；新建可 `?from_derived=` |
+| 指标地图 | `/metrics/map` | `metric_map_view` / `metric_map_panel` | 业务架构根依赖树；`?panel=` 侧栏；`/panel/<id>` 片段 |
 | 业务架构 | `/meta/biz-arch...` | `biz_arch_*` | 树 + 批处理 |
 | 表元数据 | `/meta/tables...` | `meta_table_*` | 表/字段/粒度 |
 | 维度关系 | `/meta/rels...` | `meta_rel_*` | JOIN 配置 |
@@ -448,15 +448,17 @@ flowchart TD
 | `_metric_tabs.html` | 原子/派生/复合列表 Tab |
 | `_dim_bind.html` | 维度绑定多选（编辑页复用） |
 | `_filters.html` | 过滤条件输入片段 |
-| `atomic_*.html` / `derived_*.html` / `composite_*.html` | 列表与编辑 |
+| `atomic_*.html` / `derived_*.html` / `composite_*.html` | 列表与编辑（列表含关键词查询与快捷创建链） |
 | `meta_table_*.html` / `meta_rel_*.html` | 元数据与关系 |
 | `biz_arch.html` / `biz_arch_edit.html` | 业务架构 |
-| `metric_map.html` | 依赖地图 |
+| `metric_map.html` | 业务架构根依赖地图（缩放/拖拽/高亮/折叠；`?panel=` 自动开侧栏） |
+| `_metric_map_macros.html` | 地图节点/缩放工具条宏（全页与侧栏共用） |
+| `metric_map_panel.html` | 侧栏子树 HTML 片段 |
 | `ask.html` | 问数 Demo |
 
 ### 7.2 静态资源
 
-- `static/style.css`：全局样式（含 metric-hub、compact 表等）
+- `static/style.css`：全局样式（含 metric-hub、compact 表、metric-search、map-canvas / map-panel 等）
 - 通过 `url_for('static', filename='style.css')` 引用；Flask 自动托管 `/static/...`
 
 ### 7.3 展示辅助
@@ -567,8 +569,17 @@ sequenceDiagram
 
 | 类型 | 保存时关键行为 |
 |---|---|
-| 派生 | 选定 `atomic_id`；金额/汇率/阶段在 upsert 时从原子继承；过滤存 `filter_json` |
-| 复合 | `formula` + `sub_metric_ids`；可选校验币种/粒度一致；业务分类可从公式子指标推断默认值 |
+| 派生 | 选定 `atomic_id`；金额/汇率/阶段在 upsert 时从原子继承；过滤存 `filter_json`；新建支持 `from_atomic` 预填名称与维度绑定 |
+| 复合 | `formula` + `sub_metric_ids`；可选校验币种/粒度一致；业务分类可从公式子指标推断默认值；新建支持 `from_derived` 预填子指标与公式 |
+
+### 9.3.1 列表关键词与快捷建模
+
+| 能力 | 行为 |
+|---|---|
+| 关键词 `?q=` | 原子/派生/复合列表对 ID、名称、字段、业务分类等字段做不区分大小写子串匹配；复合额外匹配子指标 ID |
+| 创建派生 | 原子列表 → `derived_edit?from_atomic=<id>` |
+| 创建复合 | 派生列表 → `composite_edit?from_derived=<id>`（子指标首位 + 公式预填） |
+| 打开地图 | 原子/复合列表 → `metric_map_view?panel=<id>&next=<列表URL>`，侧栏加载后可「返回列表」 |
 
 ### 9.4 元数据与 JOIN
 
@@ -579,7 +590,8 @@ sequenceDiagram
 ### 9.5 业务架构
 
 四级：`biz_line` → `theme_domain` → `biz_object` → `biz_process`。  
-指标编辑页通过 `biz_arch.taxonomy_catalog()` 拉下拉选项；删除节点前会检查是否被指标引用。
+指标编辑页通过 `biz_arch.taxonomy_catalog()` 拉下拉选项；删除节点前会检查是否被指标引用。  
+指标地图 `metric_map.build_metric_map` 以该树为根节点挂载复合/派生（见 §13.4）。
 
 ---
 
@@ -902,10 +914,17 @@ ChatBI 中间态另见 `chatbi.schemas.IntentStruct` / `SchemaMapInfo` / `Verify
 
 `metric_map.build_metric_map()` → `{ trees, orphans, stats }`：
 
-- `trees`：以复合为根向下展开
-- `orphans`：未被复合引用的派生/原子等
-- 用于配置可视化合规，不参与 SQL 执行
+- `trees`：以**启用中的业务架构**为骨架（业务线 → 主题域 → 业务对象 → 业务过程）；每个复合 / 派生按其分类路径挂到过程节点下，并**向下**展开到原子；无匹配路径的指标挂在「未分类」根下；空架构枝被剪掉
+- `orphans`：未被任何展开树引用的**原子**（派生不列入孤立区）
+- `stats`：树数量、孤立数、三类指标计数
+- 分类解析：优先指标自身 `biz_line` / `theme_domain` / `biz_object` / `biz_process`；派生/原子过程名可回退 `stage_type`；复合可沿子指标推断
 
+`metric_map.build_subtree(metric_id)`（供 `/metrics/map/panel/<id>`）：
+
+- 复合 / 派生：向下依赖树（与全图节点展开一致）
+- 原子：`reverse=true` 的反向引用树（谁引用了本原子 → 再向上到复合）
+
+地图用于配置可视化合规，**不参与** SQL 执行。
 ---
 
 ## 14. 扩展与改造指南
@@ -925,15 +944,16 @@ ChatBI 中间态另见 `chatbi.schemas.IntentStruct` / `SchemaMapInfo` / `Verify
 ### 14.1 本地验证清单
 
 1. 启动后打开 `http://127.0.0.1:5050`
-2. 指标管理三类列表可打开；编辑保存有 flash
-3. 问数表单：成本 GAP + CNY + 电站 + `P001` → GAP **1540**（见 [02](02_计算与币种规则.md)）
-4. 自然语言：选「自然语言（ChatBI / 回退）」  
+2. 指标管理三类列表可打开；关键词查询可用；编辑保存有 flash；原子「创建派生」/ 派生「创建复合」预填正确
+3. 指标地图：业务架构为根；点击指标高亮路径；列表「地图」打开侧栏（原子为反向引用）
+4. 问数表单：成本 GAP + CNY + 电站 + `P001` → GAP **1540**（见 [02](02_计算与币种规则.md)）
+5. 自然语言：选「自然语言（ChatBI / 回退）」  
    - 「…成本GAP以及其他相关…」→ 意图来源 ChatBI，生成 SQL  
    - 「成本GAP指标口径是什么？」→ 口径元数据，无业务 SQL  
    - 「成本GAP和PJ成本金额」→ 消歧提示  
    - 「今天天气怎么样」→ 三类能力引导  
-5. 审计中可见各阶段金额列与对应汇率列，且先换算再相减
-6. 可选：`python -m chatbi.main --batch` 无 Key 跑通意图流水线
+6. 审计中可见各阶段金额列与对应汇率列，且先换算再相减
+7. 可选：`python -m chatbi.main --batch` 无 Key 跑通意图流水线
 
 ---
 ## 15. 附录：路由速查表
@@ -942,19 +962,20 @@ ChatBI 中间态另见 `chatbi.schemas.IntentStruct` / `SchemaMapInfo` / `Verify
 |---|---|---|---|
 | GET | `/` | `index` | 首页 |
 | GET | `/metrics` | `metrics_hub` | 指标管理总览 |
-| GET | `/metrics/atomic` | `atomic_list` | 原子列表 |
+| GET | `/metrics/atomic` | `atomic_list` | 原子列表（`?q=`） |
 | GET/POST | `/metrics/atomic/edit`[`/<id>`] | `atomic_edit` | 原子编辑 |
 | POST | `/metrics/atomic/preview-sql` | `atomic_preview_sql` | 预览执行 |
 | POST | `/metrics/atomic/delete/<id>` | `atomic_delete` | 删除 |
-| GET | `/metrics/derived` | `derived_list` | 派生列表 |
-| GET/POST | `/metrics/derived/edit`[`/<id>`] | `derived_edit` | 派生编辑 |
+| GET | `/metrics/derived` | `derived_list` | 派生列表（`?q=`） |
+| GET/POST | `/metrics/derived/edit`[`/<id>`] | `derived_edit` | 派生编辑（可 `?from_atomic=`） |
 | POST | `/metrics/derived/preview-sql` | `derived_preview_sql` | 预览 |
 | POST | `/metrics/derived/delete/<id>` | `derived_delete` | 删除 |
-| GET | `/metrics/composite` | `composite_list` | 复合列表 |
-| GET/POST | `/metrics/composite/edit`[`/<id>`] | `composite_edit` | 复合编辑 |
+| GET | `/metrics/composite` | `composite_list` | 复合列表（`?q=`） |
+| GET/POST | `/metrics/composite/edit`[`/<id>`] | `composite_edit` | 复合编辑（可 `?from_derived=`） |
 | POST | `/metrics/composite/preview-sql` | `composite_preview_sql` | 预览 |
 | POST | `/metrics/composite/delete/<id>` | `composite_delete` | 删除 |
-| GET | `/metrics/map` | `metric_map_view` | 指标地图 |
+| GET | `/metrics/map` | `metric_map_view` | 指标地图（可 `?panel=` / `?next=`） |
+| GET | `/metrics/map/panel/<id>` | `metric_map_panel` | 地图侧栏 HTML 片段 |
 | GET | `/meta/biz-arch` | `biz_arch_view` | 架构树 |
 | GET/POST | `/meta/biz-arch/edit`[`/<id>`] | `biz_arch_edit` | 节点编辑 |
 | POST | `/meta/biz-arch/batch` | `biz_arch_batch` | 批量启停删 |

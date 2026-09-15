@@ -1,0 +1,32 @@
+{% from "_metric_map_macros.html" import tree_nodes, zoom_toolbar %}
+<div class="map-panel-body" data-map-scope="panel" data-root-id="{{ tree.id }}"{% if tree.reverse %} data-reverse="1"{% endif %}>
+  <div class="map-canvas-hd">
+    <div>
+      <h2 class="map-section-title" style="margin:0">{{ tree.name }}</h2>
+      <p class="muted" style="margin:0.25rem 0 0">
+        {% if tree.reverse %}
+        反向引用 · {{ tree.type_label }} · <code>{{ tree.id }}</code>
+        {% if tree.detail %} · {{ tree.detail }}{% endif %}
+        · 下方为引用本原子的派生 / 复合指标
+        {% else %}
+        {{ tree.type_label }} · <code>{{ tree.id }}</code>{% if tree.detail %} · {{ tree.detail }}{% endif %}
+        {% endif %}
+      </p>
+    </div>
+    {{ zoom_toolbar() }}
+  </div>
+  <div class="map-viewport map-panel-viewport">
+    <div class="org-zoom-shell">
+      <div class="org-zoom-inner">
+        <div class="org-wrap">
+          <ul class="org-tree">
+            {{ tree_nodes([tree]) }}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% if tree.reverse and not tree.children %}
+  <p class="muted" style="margin:0.75rem 0 0">暂无派生或复合指标引用该原子。</p>
+  {% endif %}
+</div>

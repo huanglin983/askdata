@@ -1,0 +1,63 @@
+{# Shared macros for metric map trees (full page + panel overlay). #}
+{% macro map_card(node, has_children=false) %}
+  {% set is_arch = node.is_arch if node.is_arch is defined else (node.type in ['line','domain','object','process','unclassified']) %}
+  {% set edit_ep = none if is_arch else {
+    'atomic': 'atomic_edit',
+    'derived': 'derived_edit',
+    'composite': 'composite_edit'
+  }.get(node.type) %}
+  <div class="map-card map-type-{{ node.type }}"
+       data-metric-id="{{ node.id }}"
+       data-metric-name="{{ node.name }}"
+       data-metric-type="{{ node.type }}"
+       {% if is_arch %}data-arch="1"{% endif %}
+       tabindex="0" role="button">
+    <div class="map-card-hd">
+      <div class="map-card-titles">
+        <div class="map-card-name">{{ node.name }}</div>
+        <div class="map-card-id">{{ node.id }}</div>
+      </div>
+      <span class="map-badge">{{ node.type_label }}</span>
+    </div>
+    <div class="map-card-bd">
+      <div class="map-card-label">{% if is_arch %}说明{% else %}影响因子{% endif %}</div>
+      <div class="map-card-detail">{% if node.detail %}{{ node.detail }}{% else %}—{% endif %}</div>
+      {% if node.edit_url is defined and node.edit_url %}
+      <a class="map-card-edit" href="{{ node.edit_url }}" onclick="event.stopPropagation()">编辑</a>
+      {% elif edit_ep %}
+      <a class="map-card-edit" href="{{ url_for(edit_ep, metric_id=node.id) }}" onclick="event.stopPropagation()">编辑</a>
+      {% endif %}
+    </div>
+    <span class="map-port map-port-t" aria-hidden="true"></span>
+    <span class="map-port map-port-b" aria-hidden="true"></span>
+    <span class="map-port map-port-l" aria-hidden="true"></span>
+    <span class="map-port map-port-r" aria-hidden="true"></span>
+    {% if has_children %}
+    <button type="button" class="map-toggle" aria-expanded="true" title="折叠子树" aria-label="折叠子树">−</button>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{% macro tree_nodes(nodes) %}
+  {% for node in nodes %}
+  {% set kids = node.children or [] %}
+  {% set has_kids = kids|length > 0 %}
+  <li data-metric-id="{{ node.id }}"{% if has_kids %} class="has-children"{% endif %}>
+    {{ map_card(node, has_children=has_kids) }}
+    {% if has_kids %}
+    <ul>
+      {{ tree_nodes(kids) }}
+    </ul>
+    {% endif %}
+  </li>
+  {% endfor %}
+{% endmacro %}
+
+{% macro zoom_toolbar() %}
+  <div class="map-zoom-toolbar" role="group" aria-label="画布缩放">
+    <button type="button" class="map-zoom-btn" data-zoom="out" title="缩小" aria-label="缩小">−</button>
+    <span class="map-zoom-label" data-zoom-label>100%</span>
+    <button type="button" class="map-zoom-btn" data-zoom="in" title="放大" aria-label="放大">+</button>
+    <button type="button" class="map-zoom-btn map-zoom-fit" data-zoom="fit" title="最佳大小" aria-label="最佳大小">最佳大小</button>
+  </div>
+{% endmacro %}
