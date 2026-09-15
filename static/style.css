@@ -107,6 +107,56 @@ table.compact code {
   font-size: 0.82rem;
 }
 
+/* Metric identity column: name + key + alias tags (multi-line) */
+table.compact td.metric-identity {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  vertical-align: top;
+  line-height: 1.35;
+  min-width: 10.5rem;
+  max-width: 18rem;
+}
+.metric-identity-name {
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+.metric-identity-key {
+  margin-top: 0.12rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+.metric-identity-aliases {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.28rem;
+  margin-top: 0.28rem;
+  line-height: 1.3;
+}
+.metric-identity-aliases-label {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.alias-tag {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---- Metric management hub ---- */
 .metric-hub {
   display: grid;

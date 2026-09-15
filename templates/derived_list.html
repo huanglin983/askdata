@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_list_macros.html" import metric_identity %}
 {% block title %}派生指标 · 指标管理{% endblock %}
 {% block content %}
 {% set active = 'derived' %}
@@ -11,7 +12,7 @@
     </div>
     <div class="actions" style="flex-wrap:wrap;justify-content:flex-end">
       <form method="get" class="actions metric-search" action="{{ url_for('derived_list') }}">
-        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / ID / 字段…" aria-label="关键词查询">
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / 别名 / ID / 字段…" aria-label="关键词查询">
         <button type="submit" class="secondary">查询</button>
         {% if q %}<a class="btn secondary" href="{{ url_for('derived_list') }}">清除</a>{% endif %}
       </form>
@@ -22,12 +23,12 @@
   <div class="metric-table-scroll">
   <table class="compact">
     <thead>
-      <tr><th>名称</th><th>阶段</th><th>业务线</th><th>主题域</th><th>金额列</th><th>汇率列</th><th>附加过滤</th><th>绑定维度</th><th>对外</th><th>操作</th></tr>
+      <tr><th>指标</th><th>阶段</th><th>业务线</th><th>主题域</th><th>金额列</th><th>汇率列</th><th>附加过滤</th><th>绑定维度</th><th>对外</th><th>操作</th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td title="{{ r.name }} ({{ r.id }})">{{ r.name }} <span class="badge">{{ r.id }}</span></td>
+        {{ metric_identity(r.name, r.id, r.alias_list or none) }}
         <td>{{ r.stage_type }}</td>
         <td class="muted" title="{{ r.biz_line or '-' }}">{{ r.biz_line or '-' }}</td>
         <td class="muted" title="{{ r.theme_domain or '-' }}">{{ r.theme_domain or '-' }}</td>

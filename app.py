@@ -61,6 +61,7 @@ _ATOMIC_SEARCH_FIELDS = (
     "id",
     "name",
     "name_en",
+    "aliases",
     "source_field",
     "source_table",
     "stage_type",
@@ -74,6 +75,7 @@ _ATOMIC_SEARCH_FIELDS = (
 _DERIVED_SEARCH_FIELDS = (
     "id",
     "name",
+    "aliases",
     "atomic_id",
     "stage_type",
     "amount_col",
@@ -86,12 +88,20 @@ _DERIVED_SEARCH_FIELDS = (
 _COMPOSITE_SEARCH_FIELDS = (
     "id",
     "name",
+    "aliases",
     "formula",
     "biz_line",
     "theme_domain",
     "biz_object",
     "biz_process",
 )
+
+
+def _metric_list_row(row) -> dict:
+    """Row dict for list templates: include parsed alias_list."""
+    d = dict(row)
+    d["alias_list"] = db.parse_aliases(d.get("aliases") or "")
+    return d
 
 
 @app.route("/")
@@ -420,7 +430,7 @@ def atomic_list():
     for r in db.list_atomic():
         if not _metric_kw_match(r, q, _ATOMIC_SEARCH_FIELDS):
             continue
-        d = dict(r)
+        d = _metric_list_row(r)
         d["dim_labels"] = db.metric_bound_dim_labels("atomic", r["id"])
         rows.append(d)
     return render_template("atomic_list.html", rows=rows, q=q)
@@ -471,6 +481,7 @@ def atomic_edit(metric_id: str | None = None):
                 "theme_domain": (request.form.get("theme_domain") or "").strip(),
                 "biz_object": (request.form.get("biz_object") or "").strip(),
                 "biz_process": (request.form.get("biz_process") or "").strip(),
+                "aliases": request.form.get("aliases") or "",
             }
             db.upsert_atomic(data, dim_ids=dim_ids)
             flash("原子指标已保存", "ok")
@@ -535,7 +546,7 @@ def derived_list():
     for r in db.list_derived():
         if not _metric_kw_match(r, q, _DERIVED_SEARCH_FIELDS):
             continue
-        d = dict(r)
+        d = _metric_list_row(r)
         d["dim_labels"] = db.metric_bound_dim_labels("derived", r["id"])
         rows.append(d)
     return render_template("derived_list.html", rows=rows, q=q)
@@ -588,6 +599,7 @@ def derived_edit(metric_id: str | None = None):
                 "grain_dims": '["project_number"]',
                 "exposed": 1 if request.form.get("exposed") else 0,
                 "filter_json": filter_text,
+                "aliases": request.form.get("aliases") or "",
             }
             db.upsert_derived(data, dim_ids=dim_ids)
             flash("派生指标已保存", "ok")
@@ -691,7 +703,7 @@ def composite_list():
     needle = q.lower()
     rows = []
     for r in db.list_composite():
-        d = dict(r)
+        d = _metric_list_row(r)
         d["subs"] = json.loads(r["sub_metric_ids"] or "[]")
         d["dim_labels"] = db.metric_bound_dim_labels("composite", r["id"])
         if q:
@@ -756,6 +768,7 @@ def composite_edit(metric_id: str | None = None):
             else 0,
             "biz_object": (request.form.get("biz_object") or "").strip(),
             "biz_process": (request.form.get("biz_process") or "").strip(),
+            "aliases": request.form.get("aliases") or "",
         }
         try:
             db.upsert_composite(data, dim_ids=dim_ids)

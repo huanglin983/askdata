@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_list_macros.html" import metric_identity %}
 {% block title %}原子指标 · 指标管理{% endblock %}
 {% block content %}
 {% set active = 'atomic' %}
@@ -11,7 +12,7 @@
     </div>
     <div class="actions" style="flex-wrap:wrap;justify-content:flex-end">
       <form method="get" class="actions metric-search" action="{{ url_for('atomic_list') }}">
-        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / ID / 字段…" aria-label="关键词查询">
+        <input type="search" name="q" value="{{ q or '' }}" placeholder="关键词：名称 / 别名 / ID / 字段…" aria-label="关键词查询">
         <button type="submit" class="secondary">查询</button>
         {% if q %}<a class="btn secondary" href="{{ url_for('atomic_list') }}">清除</a>{% endif %}
       </form>
@@ -22,14 +23,12 @@
   <div class="metric-table-scroll">
   <table class="compact">
     <thead>
-      <tr><th>ID</th><th>名称</th><th>英文名</th><th>字段</th><th>阶段/汇率</th><th>业务线</th><th>主题域</th><th>过滤</th><th>SQL</th><th>绑定维度</th><th>操作</th></tr>
+      <tr><th>指标</th><th>字段</th><th>阶段/汇率</th><th>业务线</th><th>主题域</th><th>过滤</th><th>SQL</th><th>绑定维度</th><th>操作</th></tr>
     </thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td title="{{ r.id }}"><code>{{ r.id }}</code></td>
-        <td title="{{ r.name }}">{{ r.name }}</td>
-        <td title="{{ r.name_en or r.source_field }}"><code>{{ r.name_en or r.source_field }}</code></td>
+        {{ metric_identity(r.name, r.name_en or r.id, r.alias_list or none) }}
         <td title="{{ r.source_field }} {{ r.agg_type }}">{{ r.source_field }} <span class="badge">{{ r.agg_type }}</span></td>
         <td class="muted" title="{% if r.stage_type %}{{ r.stage_type }} / {{ r.rate_col or '-' }}{% else %}-{% endif %}">{% if r.stage_type %}{{ r.stage_type }} / <code>{{ r.rate_col or '-' }}</code>{% else %}-{% endif %}</td>
         <td class="muted" title="{{ r.biz_line or '-' }}">{{ r.biz_line or '-' }}</td>
@@ -47,7 +46,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="11">{% if q %}无匹配「{{ q }}」的原子指标{% else %}暂无数据{% endif %}</td></tr>
+      <tr><td colspan="9">{% if q %}无匹配「{{ q }}」的原子指标{% else %}暂无数据{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

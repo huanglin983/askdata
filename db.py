@@ -21,6 +21,33 @@ STAGES = [
 ]
 
 
+def parse_aliases(raw: str | None) -> list[str]:
+    """Split aliases text (comma / Chinese comma / semicolon / newline) into unique labels."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    for sep in ("\n", "；", ";", "，"):
+        text = text.replace(sep, ",")
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in text.split(","):
+        s = part.strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def format_aliases(values: list[str] | None) -> str:
+    """Normalize alias list to comma-separated storage text."""
+    return ", ".join(parse_aliases(",".join(values or [])))
+
+
+def normalize_aliases_input(raw: str | None) -> str:
+    return format_aliases(parse_aliases(raw))
+
+
 def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -87,13 +114,48 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _add_col(conn, "metric_atomic", "stage_type", "TEXT")
     _add_col(conn, "metric_atomic", "rate_col", "TEXT")
     _add_col(conn, "metric_atomic", "name_en", "TEXT")
+    _add_col(conn, "metric_atomic", "aliases", "TEXT NOT NULL DEFAULT ''")
     for col in TAXONOMY_KEYS:
         _add_col(conn, "metric_atomic", col, "TEXT")
     _add_col(conn, "metric_derived", "filter_json", "TEXT NOT NULL DEFAULT '[]'")
+    _add_col(conn, "metric_derived", "aliases", "TEXT NOT NULL DEFAULT ''")
     for col in TAXONOMY_KEYS:
         _add_col(conn, "metric_derived", col, "TEXT")
+    _add_col(conn, "metric_composite", "aliases", "TEXT NOT NULL DEFAULT ''")
     for col in TAXONOMY_KEYS:
         _add_col(conn, "metric_composite", col, "TEXT")
+    # Demo alias backfill (only when empty; safe for existing DBs)
+    for table, pairs in (
+        (
+            "metric_atomic",
+            [
+                ("atom_power_plant", "电站名称, 电厂"),
+                ("atom_pj_total_cost", "PJ成本, PJ金额"),
+                ("atom_contract_total_cost", "合同成本, Contract金额"),
+            ],
+        ),
+        (
+            "metric_derived",
+            [
+                ("drv_pj_total_cost", "PJ总成本额, PJ成本合计"),
+                ("drv_contract_total_cost", "合同总成本, Contract成本"),
+            ],
+        ),
+        (
+            "metric_composite",
+            [
+                ("cmp_cost_gap", "成本差距, Cost GAP"),
+                ("cmp_cost_gap_rate", "GAP率, 成本差距率"),
+            ],
+        ),
+    ):
+        for mid, aliases in pairs:
+            conn.execute(
+                f"""UPDATE {table}
+                   SET aliases=?
+                   WHERE id=? AND (aliases IS NULL OR TRIM(aliases)='')""",
+                (aliases, mid),
+            )
     _migrate_metric_dim_bind_drop_fk(conn)
     # backfill derived taxonomy from atomic when empty
     conn.execute(
@@ -204,6 +266,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             sql_manual INTEGER NOT NULL DEFAULT 0,
             stage_type TEXT,
             rate_col TEXT,
+            aliases TEXT NOT NULL DEFAULT '',
             biz_line TEXT,
             theme_domain TEXT,
             biz_object TEXT,
@@ -220,6 +283,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             grain_dims TEXT NOT NULL DEFAULT '["project_number"]',
             exposed INTEGER NOT NULL DEFAULT 1,
             filter_json TEXT NOT NULL DEFAULT '',
+            aliases TEXT NOT NULL DEFAULT '',
             biz_line TEXT,
             theme_domain TEXT,
             biz_object TEXT,
@@ -234,6 +298,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             sub_metric_ids TEXT NOT NULL,
             check_currency_same INTEGER NOT NULL DEFAULT 1,
             check_granularity_same INTEGER NOT NULL DEFAULT 1,
+            aliases TEXT NOT NULL DEFAULT '',
             biz_line TEXT,
             theme_domain TEXT,
             biz_object TEXT,
@@ -463,6 +528,30 @@ def _seed(conn: sqlite3.Connection) -> None:
         ),
     )
 
+    # Demo aliases for list「别名」展示（问数同义词可后续接入）
+    conn.executemany(
+        "UPDATE metric_atomic SET aliases=? WHERE id=?",
+        [
+            ("电站名称, 电厂", "atom_power_plant"),
+            ("PJ成本, PJ金额", "atom_pj_total_cost"),
+            ("合同成本, Contract金额", "atom_contract_total_cost"),
+        ],
+    )
+    conn.executemany(
+        "UPDATE metric_derived SET aliases=? WHERE id=?",
+        [
+            ("PJ总成本额, PJ成本合计", "drv_pj_total_cost"),
+            ("合同总成本, Contract成本", "drv_contract_total_cost"),
+        ],
+    )
+    conn.executemany(
+        "UPDATE metric_composite SET aliases=? WHERE id=?",
+        [
+            ("成本差距, Cost GAP", "cmp_cost_gap"),
+            ("GAP率, 成本差距率", "cmp_cost_gap_rate"),
+        ],
+    )
+
     # Sample business data
     conn.executemany(
         """INSERT INTO dim_project(project_number, project_name, power_plant, region)
@@ -630,16 +719,17 @@ def upsert_atomic(data: dict, dim_ids: list[str] | None = None) -> None:
         data.setdefault("rate_col", "")
         data.setdefault("sql_expr", "")
         data.setdefault("name_en", data.get("source_field") or "")
+        data["aliases"] = normalize_aliases_input(data.get("aliases"))
         for k in TAXONOMY_KEYS:
             data[k] = (data.get(k) or "").strip()
         # keep derived stage/amount/rate + taxonomy in sync when atomic changes
         conn.execute(
             """INSERT INTO metric_atomic
                (id, name, name_en, source_table, source_field, agg_type, grain_dims, remark,
-                filter_json, sql_expr, sql_manual, stage_type, rate_col,
+                filter_json, sql_expr, sql_manual, stage_type, rate_col, aliases,
                 biz_line, theme_domain, biz_object, biz_process)
                VALUES (:id,:name,:name_en,:source_table,:source_field,:agg_type,:grain_dims,:remark,
-                       :filter_json,:sql_expr,:sql_manual,:stage_type,:rate_col,
+                       :filter_json,:sql_expr,:sql_manual,:stage_type,:rate_col,:aliases,
                        :biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
@@ -654,6 +744,7 @@ def upsert_atomic(data: dict, dim_ids: list[str] | None = None) -> None:
                  sql_manual=excluded.sql_manual,
                  stage_type=excluded.stage_type,
                  rate_col=excluded.rate_col,
+                 aliases=excluded.aliases,
                  biz_line=excluded.biz_line,
                  theme_domain=excluded.theme_domain,
                  biz_object=excluded.biz_object,
@@ -748,12 +839,13 @@ def upsert_derived(data: dict, dim_ids: list[str] | None = None) -> None:
             raise ValueError("来源原子未维护业务阶段 stage_type")
         if not data["rate_col"]:
             raise ValueError("来源原子未维护同阶段汇率字段 rate_col")
+        data["aliases"] = normalize_aliases_input(data.get("aliases"))
         conn.execute(
             """INSERT INTO metric_derived
                (id, name, atomic_id, stage_type, amount_col, rate_col, grain_dims, exposed, filter_json,
-                biz_line, theme_domain, biz_object, biz_process)
+                aliases, biz_line, theme_domain, biz_object, biz_process)
                VALUES (:id,:name,:atomic_id,:stage_type,:amount_col,:rate_col,:grain_dims,:exposed,:filter_json,
-                       :biz_line,:theme_domain,:biz_object,:biz_process)
+                       :aliases,:biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
                  atomic_id=excluded.atomic_id,
@@ -763,6 +855,7 @@ def upsert_derived(data: dict, dim_ids: list[str] | None = None) -> None:
                  grain_dims=excluded.grain_dims,
                  exposed=excluded.exposed,
                  filter_json=excluded.filter_json,
+                 aliases=excluded.aliases,
                  biz_line=excluded.biz_line,
                  theme_domain=excluded.theme_domain,
                  biz_object=excluded.biz_object,
@@ -923,18 +1016,20 @@ def upsert_composite(data: dict, dim_ids: list[str] | None = None) -> None:
         data["biz_process"] = (data.get("biz_process") or "").strip() or defaults[
             "biz_process"
         ]
+        data["aliases"] = normalize_aliases_input(data.get("aliases"))
         conn.execute(
             """INSERT INTO metric_composite
                (id, name, formula, sub_metric_ids, check_currency_same, check_granularity_same,
-                biz_line, theme_domain, biz_object, biz_process)
+                aliases, biz_line, theme_domain, biz_object, biz_process)
                VALUES (:id,:name,:formula,:sub_metric_ids,:check_currency_same,:check_granularity_same,
-                       :biz_line,:theme_domain,:biz_object,:biz_process)
+                       :aliases,:biz_line,:theme_domain,:biz_object,:biz_process)
                ON CONFLICT(id) DO UPDATE SET
                  name=excluded.name,
                  formula=excluded.formula,
                  sub_metric_ids=excluded.sub_metric_ids,
                  check_currency_same=excluded.check_currency_same,
                  check_granularity_same=excluded.check_granularity_same,
+                 aliases=excluded.aliases,
                  biz_line=excluded.biz_line,
                  theme_domain=excluded.theme_domain,
                  biz_object=excluded.biz_object,
