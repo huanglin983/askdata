@@ -4498,10 +4498,10 @@
         <div class="pulse-dot"></div>
         <h1>指标分层：理论 · 配置 · SQL 生成</h1>
       </div>
-      <p class="subtitle">原子 / 派生 / 复合 — 三栏对照（语义层元数据驱动）</p>
+      <p class="subtitle">三列并行：理论定义层 → 模型配置层 → Engine SQL 生成层</p>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"atomic-row","label":"原子指标行","focus":["atomic_theory","atomic_config","atomic_engine"],"note":"绑定物理金额与同阶段汇率；CASE 过滤后注入币种模板。"},{"id":"derived-row","label":"派生指标行","focus":["derived_theory","derived_config","derived_engine","atomic_engine"],"note":"继承原子 FX；叠加派生过滤后再换汇；对外默认可问。"},{"id":"composite-row","label":"复合指标行","focus":["composite_theory","composite_config","composite_engine","derived_engine"],"note":"子指标各自先换汇，再按公式四则；禁止先差后乘。"}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"atomic-row","label":"原子指标行","focus":["atomic_theory","atomic_config","atomic_engine"],"note":"原始字段聚合，无指标依赖；配置事实表字段+聚合函数；引擎直接输出聚合表达式。"},{"id":"derived-row","label":"派生指标行","focus":["derived_theory","derived_config","derived_engine"],"note":"原子+维度过滤（同事实模型）；配置引用原子并加过滤；CASE WHEN 嵌入聚合内部。"},{"id":"composite-row","label":"复合指标行","focus":["composite_theory","composite_config","composite_engine"],"note":"多指标四则（可跨模型）；配置用指标 ID 写公式；递归展开后内层子查询、外层运算。"}]</script>
 
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -4546,7 +4546,7 @@
     <div class="diagram-container" data-detail-level="read">
       <svg viewBox="0 0 720 528" role="img" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
         <title id="archify-diagram-title">指标分层：理论 · 配置 · SQL 生成</title>
-        <desc id="archify-diagram-description">原子 / 派生 / 复合 — 三栏对照（语义层元数据驱动）</desc>
+        <desc id="archify-diagram-description">三列并行：理论定义层 → 模型配置层 → Engine SQL 生成层</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -4582,13 +4582,13 @@
         <!-- Phase headers -->
         <line x1="42" y1="35" x2="134" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="42" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="88" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">理论</text>
+        <text x="88" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">理论定义层</text>
         <line x1="254" y1="35" x2="346" y2="35" class="a-emphasis" stroke-width="1.1"/>
         <rect x="254" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="300" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">配置落地</text>
+        <text x="300" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">模型配置层</text>
         <line x1="454" y1="35" x2="546" y2="35" class="a-dashed" stroke-width="1.1"/>
         <rect x="454" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="500" y="39" class="t-messagebus" font-size="8" font-weight="600" text-anchor="middle">SQL 与引擎生成</text>
+        <text x="500" y="39" class="t-messagebus" font-size="8" font-weight="600" text-anchor="middle">Engine SQL 生成层</text>
 
         <!-- Workflow groups -->
 
@@ -4600,29 +4600,23 @@
         <path data-edge-from="derived_config" data-edge-to="derived_engine" data-edge-key="3" data-composition-points="346,243;454,243" d="M 346 243 L 454 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="composite_theory" data-edge-to="composite_config" data-edge-key="4" data-composition-points="134,367;254,367" d="M 134 367 L 254 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="composite_config" data-edge-to="composite_engine" data-edge-key="5" data-composition-points="346,367;454,367" d="M 346 367 L 454 367" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="atomic_theory" data-edge-to="derived_theory" data-edge-key="6" data-composition-points="88,153;88,166;88,166;88,209" d="M 88 153 L 88 166 L 88 166 L 88 209" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="derived_theory" data-edge-to="composite_theory" data-edge-key="7" data-composition-points="88,277;88,290;88,290;88,333" d="M 88 277 L 88 290 L 88 290 L 88 333" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="atomic_config" data-edge-to="derived_config" data-edge-key="8" data-composition-points="300,153;300,166;300,166;300,209" d="M 300 153 L 300 166 L 300 166 L 300 209" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="derived_config" data-edge-to="composite_config" data-edge-key="9" data-composition-points="300,277;300,290;300,290;300,333" d="M 300 277 L 300 290 L 300 290 L 300 333" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="atomic_engine" data-edge-to="derived_engine" data-edge-key="10" data-composition-points="500,153;500,166;500,166;500,209" d="M 500 153 L 500 166 L 500 166 L 500 209" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="derived_engine" data-edge-to="composite_engine" data-edge-key="11" data-composition-points="500,277;500,290;500,290;500,333" d="M 500 277 L 500 290 L 500 290 L 500 333" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
-        <g id="node-atomic_theory" data-node-id="atomic_theory" data-node-label="绑定物理字段" tabindex="0" role="button" aria-label="Focus 绑定物理字段, 金额+同前缀汇率, 原子指标 › 理论" aria-pressed="false" data-node-kind="database" data-node-sublabel="金额+同前缀汇率" data-node-tag="少 WHERE" data-node-context="原子指标 › 理论">
-          <title>绑定物理字段 · 金额+同前缀汇率 · 原子指标 › 理论 · 少 WHERE</title>
+        <g id="node-atomic_theory" data-node-id="atomic_theory" data-node-label="原始字段聚合" tabindex="0" role="button" aria-label="Focus 原始字段聚合, 无指标依赖, 原子指标 › 理论定义层" aria-pressed="false" data-node-kind="database" data-node-sublabel="无指标依赖" data-node-tag="原子" data-node-context="原子指标 › 理论定义层">
+          <title>原始字段聚合 · 无指标依赖 · 原子指标 › 理论定义层 · 原子</title>
           <rect x="42" y="85" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="42" y="85" width="92" height="68" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(48 91) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-detail-anchor x="88" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">绑定物理字段</text>
-          <text data-detail="context" x="88" y="123" class="t-muted" font-size="8" text-anchor="middle">金额+同前缀汇率</text>
-        <text data-detail="fine" x="88" y="141" class="t-database" font-size="7" text-anchor="middle">少 WHERE</text>
+          <text data-detail-anchor x="88" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">原始字段聚合</text>
+          <text data-detail="context" x="88" y="123" class="t-muted" font-size="8" text-anchor="middle">无指标依赖</text>
+        <text data-detail="fine" x="88" y="141" class="t-database" font-size="7" text-anchor="middle">原子</text>
         </g>
 
-        <g id="node-atomic_config" data-node-id="atomic_config" data-node-label="原子配置" tabindex="0" role="button" aria-label="Focus 原子配置, metric_atomic, 原子指标 › 配置落地" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="metric_atomic" data-node-tag="stage/rate" data-node-context="原子指标 › 配置落地">
-          <title>原子配置 · metric_atomic · 原子指标 › 配置落地 · stage/rate</title>
+        <g id="node-atomic_config" data-node-id="atomic_config" data-node-label="事实表+聚合" tabindex="0" role="button" aria-label="Focus 事实表+聚合, sum(amount), 原子指标 › 模型配置层" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="sum(amount)" data-node-tag="配置" data-node-context="原子指标 › 模型配置层">
+          <title>事实表+聚合 · sum(amount) · 原子指标 › 模型配置层 · 配置</title>
           <rect x="254" y="85" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="254" y="85" width="92" height="68" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(260 91) scale(0.6875)">
@@ -4631,38 +4625,38 @@
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-detail-anchor x="300" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">原子配置</text>
-          <text data-detail="context" x="300" y="123" class="t-muted" font-size="8" text-anchor="middle">metric_atomic</text>
-        <text data-detail="fine" x="300" y="141" class="t-frontend" font-size="7" text-anchor="middle">stage/rate</text>
+          <text data-detail-anchor x="300" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">事实表+聚合</text>
+          <text data-detail="context" x="300" y="123" class="t-muted" font-size="8" text-anchor="middle">sum(amount)</text>
+        <text data-detail="fine" x="300" y="141" class="t-frontend" font-size="7" text-anchor="middle">配置</text>
         </g>
 
-        <g id="node-atomic_engine" data-node-id="atomic_engine" data-node-label="原子引擎" tabindex="0" role="button" aria-label="Focus 原子引擎, CASE→币种模板, 原子指标 › SQL 与引擎生成" aria-pressed="false" data-node-kind="backend" data-node-sublabel="CASE→币种模板" data-node-tag="前缀校验" data-node-context="原子指标 › SQL 与引擎生成">
-          <title>原子引擎 · CASE→币种模板 · 原子指标 › SQL 与引擎生成 · 前缀校验</title>
+        <g id="node-atomic_engine" data-node-id="atomic_engine" data-node-label="直接输出聚合" tabindex="0" role="button" aria-label="Focus 直接输出聚合, SUM(fact.field), 原子指标 › Engine SQL 生成层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="SUM(fact.field)" data-node-tag="引擎" data-node-context="原子指标 › Engine SQL 生成层">
+          <title>直接输出聚合 · SUM(fact.field) · 原子指标 › Engine SQL 生成层 · 引擎</title>
           <rect x="454" y="85" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="454" y="85" width="92" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(460 91) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-detail-anchor x="500" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">原子引擎</text>
-          <text data-detail="context" x="500" y="123" class="t-muted" font-size="8" text-anchor="middle">CASE→币种模板</text>
-        <text data-detail="fine" x="500" y="141" class="t-backend" font-size="7" text-anchor="middle">前缀校验</text>
+          <text data-detail-anchor x="500" y="106" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">直接输出聚合</text>
+          <text data-detail="context" x="500" y="123" class="t-muted" font-size="8" text-anchor="middle">SUM(fact.field)</text>
+        <text data-detail="fine" x="500" y="141" class="t-backend" font-size="7" text-anchor="middle">引擎</text>
         </g>
 
-        <g id="node-derived_theory" data-node-id="derived_theory" data-node-label="原子+切片" tabindex="0" role="button" aria-label="Focus 原子+切片, 维度绑定+过滤, 派生指标 › 理论" aria-pressed="false" data-node-kind="database" data-node-sublabel="维度绑定+过滤" data-node-tag="对外可问" data-node-context="派生指标 › 理论">
-          <title>原子+切片 · 维度绑定+过滤 · 派生指标 › 理论 · 对外可问</title>
+        <g id="node-derived_theory" data-node-id="derived_theory" data-node-label="原子+维度过滤" tabindex="0" role="button" aria-label="Focus 原子+维度过滤, 同事实模型, 派生指标 › 理论定义层" aria-pressed="false" data-node-kind="database" data-node-sublabel="同事实模型" data-node-tag="派生" data-node-context="派生指标 › 理论定义层">
+          <title>原子+维度过滤 · 同事实模型 · 派生指标 › 理论定义层 · 派生</title>
           <rect x="42" y="209" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="42" y="209" width="92" height="68" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(48 215) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-detail-anchor x="88" y="230" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">原子+切片</text>
-          <text data-detail="context" x="88" y="247" class="t-muted" font-size="8" text-anchor="middle">维度绑定+过滤</text>
-        <text data-detail="fine" x="88" y="265" class="t-database" font-size="7" text-anchor="middle">对外可问</text>
+          <text data-detail-anchor x="88" y="230" class="t-primary" font-size="10.7" font-weight="600" text-anchor="middle">原子+维度过滤</text>
+          <text data-detail="context" x="88" y="247" class="t-muted" font-size="8" text-anchor="middle">同事实模型</text>
+        <text data-detail="fine" x="88" y="265" class="t-database" font-size="7" text-anchor="middle">派生</text>
         </g>
 
-        <g id="node-derived_config" data-node-id="derived_config" data-node-label="派生配置" tabindex="0" role="button" aria-label="Focus 派生配置, metric_derived, 派生指标 › 配置落地" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="metric_derived" data-node-tag="atomic_id" data-node-context="派生指标 › 配置落地">
-          <title>派生配置 · metric_derived · 派生指标 › 配置落地 · atomic_id</title>
+        <g id="node-derived_config" data-node-id="derived_config" data-node-label="引用原子+过滤" tabindex="0" role="button" aria-label="Focus 引用原子+过滤, status=&#39;PAID&#39;, 派生指标 › 模型配置层" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="status=&#39;PAID&#39;" data-node-tag="配置" data-node-context="派生指标 › 模型配置层">
+          <title>引用原子+过滤 · status=&#39;PAID&#39; · 派生指标 › 模型配置层 · 配置</title>
           <rect x="254" y="209" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="254" y="209" width="92" height="68" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(260 215) scale(0.6875)">
@@ -4671,38 +4665,38 @@
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-detail-anchor x="300" y="230" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">派生配置</text>
-          <text data-detail="context" x="300" y="247" class="t-muted" font-size="8" text-anchor="middle">metric_derived</text>
-        <text data-detail="fine" x="300" y="265" class="t-frontend" font-size="7" text-anchor="middle">atomic_id</text>
+          <text data-detail-anchor x="300" y="230" class="t-primary" font-size="10.7" font-weight="600" text-anchor="middle">引用原子+过滤</text>
+          <text data-detail="context" x="300" y="247" class="t-muted" font-size="8" text-anchor="middle">status=&#39;PAID&#39;</text>
+        <text data-detail="fine" x="300" y="265" class="t-frontend" font-size="7" text-anchor="middle">配置</text>
         </g>
 
-        <g id="node-derived_engine" data-node-id="derived_engine" data-node-label="派生引擎" tabindex="0" role="button" aria-label="Focus 派生引擎, 叠过滤再换汇, 派生指标 › SQL 与引擎生成" aria-pressed="false" data-node-kind="backend" data-node-sublabel="叠过滤再换汇" data-node-tag="wrap_case" data-node-context="派生指标 › SQL 与引擎生成">
-          <title>派生引擎 · 叠过滤再换汇 · 派生指标 › SQL 与引擎生成 · wrap_case</title>
+        <g id="node-derived_engine" data-node-id="derived_engine" data-node-label="CASE嵌入聚合" tabindex="0" role="button" aria-label="Focus CASE嵌入聚合, SUM(CASE...), 派生指标 › Engine SQL 生成层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="SUM(CASE...)" data-node-tag="引擎" data-node-context="派生指标 › Engine SQL 生成层">
+          <title>CASE嵌入聚合 · SUM(CASE...) · 派生指标 › Engine SQL 生成层 · 引擎</title>
           <rect x="454" y="209" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="454" y="209" width="92" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(460 215) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-detail-anchor x="500" y="230" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">派生引擎</text>
-          <text data-detail="context" x="500" y="247" class="t-muted" font-size="8" text-anchor="middle">叠过滤再换汇</text>
-        <text data-detail="fine" x="500" y="265" class="t-backend" font-size="7" text-anchor="middle">wrap_case</text>
+          <text data-detail-anchor x="500" y="230" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">CASE嵌入聚合</text>
+          <text data-detail="context" x="500" y="247" class="t-muted" font-size="8" text-anchor="middle">SUM(CASE...)</text>
+        <text data-detail="fine" x="500" y="265" class="t-backend" font-size="7" text-anchor="middle">引擎</text>
         </g>
 
-        <g id="node-composite_theory" data-node-id="composite_theory" data-node-label="同粒度四则" tabindex="0" role="button" aria-label="Focus 同粒度四则, 先换汇再运算, 复合指标 › 理论" aria-pressed="false" data-node-kind="database" data-node-sublabel="先换汇再运算" data-node-tag="禁先差后乘" data-node-context="复合指标 › 理论">
-          <title>同粒度四则 · 先换汇再运算 · 复合指标 › 理论 · 禁先差后乘</title>
+        <g id="node-composite_theory" data-node-id="composite_theory" data-node-label="多指标四则" tabindex="0" role="button" aria-label="Focus 多指标四则, 可跨模型, 复合指标 › 理论定义层" aria-pressed="false" data-node-kind="database" data-node-sublabel="可跨模型" data-node-tag="复合" data-node-context="复合指标 › 理论定义层">
+          <title>多指标四则 · 可跨模型 · 复合指标 › 理论定义层 · 复合</title>
           <rect x="42" y="333" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="42" y="333" width="92" height="68" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(48 339) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-detail-anchor x="88" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">同粒度四则</text>
-          <text data-detail="context" x="88" y="371" class="t-muted" font-size="8" text-anchor="middle">先换汇再运算</text>
-        <text data-detail="fine" x="88" y="389" class="t-database" font-size="7" text-anchor="middle">禁先差后乘</text>
+          <text data-detail-anchor x="88" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">多指标四则</text>
+          <text data-detail="context" x="88" y="371" class="t-muted" font-size="8" text-anchor="middle">可跨模型</text>
+        <text data-detail="fine" x="88" y="389" class="t-database" font-size="7" text-anchor="middle">复合</text>
         </g>
 
-        <g id="node-composite_config" data-node-id="composite_config" data-node-label="复合配置" tabindex="0" role="button" aria-label="Focus 复合配置, metric_composite, 复合指标 › 配置落地" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="metric_composite" data-node-tag="formula" data-node-context="复合指标 › 配置落地">
-          <title>复合配置 · metric_composite · 复合指标 › 配置落地 · formula</title>
+        <g id="node-composite_config" data-node-id="composite_config" data-node-label="指标ID写公式" tabindex="0" role="button" aria-label="Focus 指标ID写公式, 金额/订单数, 复合指标 › 模型配置层" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="金额/订单数" data-node-tag="配置" data-node-context="复合指标 › 模型配置层">
+          <title>指标ID写公式 · 金额/订单数 · 复合指标 › 模型配置层 · 配置</title>
           <rect x="254" y="333" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="254" y="333" width="92" height="68" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(260 339) scale(0.6875)">
@@ -4711,30 +4705,24 @@
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-detail-anchor x="300" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">复合配置</text>
-          <text data-detail="context" x="300" y="371" class="t-muted" font-size="8" text-anchor="middle">metric_composite</text>
-        <text data-detail="fine" x="300" y="389" class="t-frontend" font-size="7" text-anchor="middle">formula</text>
+          <text data-detail-anchor x="300" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">指标ID写公式</text>
+          <text data-detail="context" x="300" y="371" class="t-muted" font-size="8" text-anchor="middle">金额/订单数</text>
+        <text data-detail="fine" x="300" y="389" class="t-frontend" font-size="7" text-anchor="middle">配置</text>
         </g>
 
-        <g id="node-composite_engine" data-node-id="composite_engine" data-node-label="复合引擎" tabindex="0" role="button" aria-label="Focus 复合引擎, 子式替换运算, 复合指标 › SQL 与引擎生成" aria-pressed="false" data-node-kind="backend" data-node-sublabel="子式替换运算" data-node-tag="最长名优先" data-node-context="复合指标 › SQL 与引擎生成">
-          <title>复合引擎 · 子式替换运算 · 复合指标 › SQL 与引擎生成 · 最长名优先</title>
+        <g id="node-composite_engine" data-node-id="composite_engine" data-node-label="递归展开" tabindex="0" role="button" aria-label="Focus 递归展开, 内层→外层运算, 复合指标 › Engine SQL 生成层" aria-pressed="false" data-node-kind="backend" data-node-sublabel="内层→外层运算" data-node-tag="引擎" data-node-context="复合指标 › Engine SQL 生成层">
+          <title>递归展开 · 内层→外层运算 · 复合指标 › Engine SQL 生成层 · 引擎</title>
           <rect x="454" y="333" width="92" height="68" rx="6" class="c-mask"/>
           <rect x="454" y="333" width="92" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(460 339) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-detail-anchor x="500" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">复合引擎</text>
-          <text data-detail="context" x="500" y="371" class="t-muted" font-size="8" text-anchor="middle">子式替换运算</text>
-        <text data-detail="fine" x="500" y="389" class="t-backend" font-size="7" text-anchor="middle">最长名优先</text>
+          <text data-detail-anchor x="500" y="354" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">递归展开</text>
+          <text data-detail="context" x="500" y="371" class="t-muted" font-size="8" text-anchor="middle">内层→外层运算</text>
+        <text data-detail="fine" x="500" y="389" class="t-backend" font-size="7" text-anchor="middle">引擎</text>
         </g>
 
         <!-- Edge labels -->
-
-
-
-
-
-
 
 
 
@@ -4955,33 +4943,33 @@
           <h3>三栏怎么读</h3>
         </div>
         <ul>
-          <li>&bull; 左栏：语义定义与财务红线</li>
-          <li>&bull; 中栏：表字段与 /metrics 配置入口</li>
-          <li>&bull; 右栏：engine / metric_sql 生成步骤</li>
+          <li>&bull; 左栏：理论定义（是什么）</li>
+          <li>&bull; 中栏：模型配置（怎么配）</li>
+          <li>&bull; 右栏：Engine SQL 生成（怎么翻）</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot emerald"></div>
-          <h3>依赖链</h3>
+          <h3>一句话区分</h3>
         </div>
         <ul>
-          <li>&bull; 原子维护 stage_type + rate_col</li>
-          <li>&bull; 派生只读继承金额与汇率</li>
-          <li>&bull; 复合对子指标各自换汇后再四则</li>
+          <li>&bull; 原子：原始字段聚合</li>
+          <li>&bull; 派生：原子 + 过滤（不做指标四则）</li>
+          <li>&bull; 复合：指标和指标运算</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot rose"></div>
-          <h3>禁止项</h3>
+          <h3>引擎要点</h3>
         </div>
         <ul>
-          <li>&bull; 跨阶段汇率混用</li>
-          <li>&bull; 复合先算差再统一乘汇率</li>
-          <li>&bull; AI 直接 NL2SQL 改写口径</li>
+          <li>&bull; 递归遇到原子即终止，并做环检测</li>
+          <li>&bull; 派生优先 CASE WHEN，不单独 WHERE</li>
+          <li>&bull; 复合外层运算，分母可用 NULLIF 保护</li>
         </ul>
       </div>
     </div>

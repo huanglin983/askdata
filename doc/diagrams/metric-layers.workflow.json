@@ -3,7 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "指标分层：理论 · 配置 · SQL 生成",
-    "subtitle": "原子 / 派生 / 复合 — 三栏对照（语义层元数据驱动）",
+    "subtitle": "三列并行：理论定义层 → 模型配置层 → Engine SQL 生成层",
     "output": "doc/diagrams/metric-layers.html",
     "animation": "none",
     "quality_profile": "showcase",
@@ -12,19 +12,19 @@
         "id": "atomic-row",
         "label": "原子指标行",
         "focus": ["atomic_theory", "atomic_config", "atomic_engine"],
-        "note": "绑定物理金额与同阶段汇率；CASE 过滤后注入币种模板。"
+        "note": "原始字段聚合，无指标依赖；配置事实表字段+聚合函数；引擎直接输出聚合表达式。"
       },
       {
         "id": "derived-row",
         "label": "派生指标行",
-        "focus": ["derived_theory", "derived_config", "derived_engine", "atomic_engine"],
-        "note": "继承原子 FX；叠加派生过滤后再换汇；对外默认可问。"
+        "focus": ["derived_theory", "derived_config", "derived_engine"],
+        "note": "原子+维度过滤（同事实模型）；配置引用原子并加过滤；CASE WHEN 嵌入聚合内部。"
       },
       {
         "id": "composite-row",
         "label": "复合指标行",
-        "focus": ["composite_theory", "composite_config", "composite_engine", "derived_engine"],
-        "note": "子指标各自先换汇，再按公式四则；禁止先差后乘。"
+        "focus": ["composite_theory", "composite_config", "composite_engine"],
+        "note": "多指标四则（可跨模型）；配置用指标 ID 写公式；递归展开后内层子查询、外层运算。"
       }
     ]
   },
@@ -34,16 +34,14 @@
     { "id": "composite", "label": "复合指标" }
   ],
   "phases": [
-    { "id": "theory", "label": "理论", "fromCol": 0, "toCol": 0 },
-    { "id": "config", "label": "配置落地", "fromCol": 2, "toCol": 2, "variant": "emphasis" },
-    { "id": "sqlgen", "label": "SQL 与引擎生成", "fromCol": 4, "toCol": 4, "variant": "dashed" }
+    { "id": "theory", "label": "理论定义层", "fromCol": 0, "toCol": 0 },
+    { "id": "config", "label": "模型配置层", "fromCol": 2, "toCol": 2, "variant": "emphasis" },
+    { "id": "sqlgen", "label": "Engine SQL 生成层", "fromCol": 4, "toCol": 4, "variant": "dashed" }
   ],
   "mainPath": [
     "atomic_theory",
     "atomic_config",
-    "atomic_engine",
-    "derived_engine",
-    "composite_engine"
+    "atomic_engine"
   ],
   "nodes": [
     {
@@ -51,81 +49,81 @@
       "lane": "atomic",
       "col": 0,
       "type": "database",
-      "label": "绑定物理字段",
-      "sublabel": "金额+同前缀汇率",
-      "tag": "少 WHERE"
+      "label": "原始字段聚合",
+      "sublabel": "无指标依赖",
+      "tag": "原子"
     },
     {
       "id": "atomic_config",
       "lane": "atomic",
       "col": 2,
       "type": "frontend",
-      "label": "原子配置",
-      "sublabel": "metric_atomic",
-      "tag": "stage/rate"
+      "label": "事实表+聚合",
+      "sublabel": "sum(amount)",
+      "tag": "配置"
     },
     {
       "id": "atomic_engine",
       "lane": "atomic",
       "col": 4,
       "type": "backend",
-      "label": "原子引擎",
-      "sublabel": "CASE→币种模板",
-      "tag": "前缀校验"
+      "label": "直接输出聚合",
+      "sublabel": "SUM(fact.field)",
+      "tag": "引擎"
     },
     {
       "id": "derived_theory",
       "lane": "derived",
       "col": 0,
       "type": "database",
-      "label": "原子+切片",
-      "sublabel": "维度绑定+过滤",
-      "tag": "对外可问"
+      "label": "原子+维度过滤",
+      "sublabel": "同事实模型",
+      "tag": "派生"
     },
     {
       "id": "derived_config",
       "lane": "derived",
       "col": 2,
       "type": "frontend",
-      "label": "派生配置",
-      "sublabel": "metric_derived",
-      "tag": "atomic_id"
+      "label": "引用原子+过滤",
+      "sublabel": "status='PAID'",
+      "tag": "配置"
     },
     {
       "id": "derived_engine",
       "lane": "derived",
       "col": 4,
       "type": "backend",
-      "label": "派生引擎",
-      "sublabel": "叠过滤再换汇",
-      "tag": "wrap_case"
+      "label": "CASE嵌入聚合",
+      "sublabel": "SUM(CASE...)",
+      "tag": "引擎"
     },
     {
       "id": "composite_theory",
       "lane": "composite",
       "col": 0,
       "type": "database",
-      "label": "同粒度四则",
-      "sublabel": "先换汇再运算",
-      "tag": "禁先差后乘"
+      "label": "多指标四则",
+      "sublabel": "可跨模型",
+      "tag": "复合"
     },
     {
       "id": "composite_config",
       "lane": "composite",
       "col": 2,
       "type": "frontend",
-      "label": "复合配置",
-      "sublabel": "metric_composite",
-      "tag": "formula"
+      "label": "指标ID写公式",
+      "sublabel": "金额/订单数",
+      "tag": "配置"
     },
     {
       "id": "composite_engine",
       "lane": "composite",
       "col": 4,
       "type": "backend",
-      "label": "复合引擎",
-      "sublabel": "子式替换运算",
-      "tag": "最长名优先"
+      "label": "递归展开",
+      "sublabel": "内层→外层运算",
+      "tag": "引擎"
     }
   ],
   "edges": [
@@ -134,82 +132,34 @@
     { "from": "derived_theory", "to": "derived_config" },
     { "from": "derived_config", "to": "derived_engine", "variant": "emphasis" },
     { "from": "composite_theory", "to": "composite_config" },
-    { "from": "composite_config", "to": "composite_engine", "variant": "emphasis" },
-    {
-      "from": "atomic_theory",
-      "to": "derived_theory",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    },
-    {
-      "from": "derived_theory",
-      "to": "composite_theory",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    },
-    {
-      "from": "atomic_config",
-      "to": "derived_config",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    },
-    {
-      "from": "derived_config",
-      "to": "composite_config",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    },
-    {
-      "from": "atomic_engine",
-      "to": "derived_engine",
-      "variant": "emphasis",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    },
-    {
-      "from": "derived_engine",
-      "to": "composite_engine",
-      "variant": "emphasis",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop"
-    }
+    { "from": "composite_config", "to": "composite_engine", "variant": "emphasis" }
   ],
   "cards": [
     {
       "dot": "cyan",
       "title": "三栏怎么读",
       "items": [
-        "左栏：语义定义与财务红线",
-        "中栏：表字段与 /metrics 配置入口",
-        "右栏：engine / metric_sql 生成步骤"
+        "左栏：理论定义（是什么）",
+        "中栏：模型配置（怎么配）",
+        "右栏：Engine SQL 生成（怎么翻）"
       ]
     },
     {
       "dot": "emerald",
-      "title": "依赖链",
+      "title": "一句话区分",
       "items": [
-        "原子维护 stage_type + rate_col",
-        "派生只读继承金额与汇率",
-        "复合对子指标各自换汇后再四则"
+        "原子：原始字段聚合",
+        "派生：原子 + 过滤（不做指标四则）",
+        "复合：指标和指标运算"
       ]
     },
     {
       "dot": "rose",
-      "title": "禁止项",
+      "title": "引擎要点",
       "items": [
-        "跨阶段汇率混用",
-        "复合先算差再统一乘汇率",
-        "AI 直接 NL2SQL 改写口径"
+        "递归遇到原子即终止，并做环检测",
+        "派生优先 CASE WHEN，不单独 WHERE",
+        "复合外层运算，分母可用 NULLIF 保护"
       ]
     }
   ]

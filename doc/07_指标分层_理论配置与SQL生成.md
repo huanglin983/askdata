@@ -7,11 +7,17 @@
 
 ## 1. 交互流程图
 
-打开可交互图（暗/亮主题、导出 PNG）：
+打开可交互图（暗/亮主题、导出 PNG），与下文「二、纵向流程图」Mermaid **同口径**：
 
 **[diagrams/metric-layers.html](diagrams/metric-layers.html)**
 
-源规范：[diagrams/metric-layers.workflow.json](diagrams/metric-layers.workflow.json) 
+| 列 | 含义 |
+|---|---|
+| 理论定义层 | 原子 / 派生 / 复合是什么 |
+| 模型配置层 | 怎么配（字段+聚合 / 引用原子+过滤 / 指标 ID 公式） |
+| Engine SQL 生成层 | 怎么翻（直接聚合 / CASE 嵌入 / 递归展开） |
+
+源规范：[diagrams/metric-layers.workflow.json](diagrams/metric-layers.workflow.json)
 
 ---
 
