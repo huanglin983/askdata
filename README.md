@@ -31,6 +31,25 @@ Python + Flask + SQLite。语义层元数据驱动，AI/意图层只出结构化
 
 ## 启动
 
+一键脚本（缺省 `start`；默认绑定 `0.0.0.0:5050`）：
+
+```bash
+# Windows
+start.bat            # 启动
+start.bat stop       # 停止
+start.bat restart    # 重启
+
+# macOS / Linux
+chmod +x start.sh    # 首次
+./start.sh           # 启动
+./start.sh stop
+./start.sh restart
+```
+
+脚本会自动创建 `.venv` 并安装依赖；日志写入 `.askdata.log`。
+
+也可手工启动：
+
 ```bash
 python -m venv .venv
 
@@ -44,7 +63,7 @@ python -m venv .venv
 # .venv/bin/python app.py
 ```
 
-浏览器：[http://127.0.0.1:5050](http://127.0.0.1:5050)  
+浏览器：[http://127.0.0.1:5050](http://127.0.0.1:5050)（本机）或 `http://<主机IP>:5050`（局域网）
 
 首次启动自动建库灌种（`data/demo.db`，已 gitignore）。
 
@@ -75,6 +94,7 @@ python -m venv .venv
 app.py / db.py / engine.py / intent.py / intent_chatbi.py / intent_llm.py / display.py
 meta.py / biz_arch.py / metric_sql.py / metric_map.py
 chatbi/  templates/  static/  data/  doc/  requirements.txt  .env.example
+start.sh  start.bat
 ```
 
 

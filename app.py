@@ -1006,5 +1006,12 @@ def reset_db():
 
 
 if __name__ == "__main__":
+    import os
+
     db.init_db()
-    app.run(host="127.0.0.1", port=5050, debug=True)
+    host = os.environ.get("ASKDATA_HOST", "0.0.0.0")
+    port = int(os.environ.get("ASKDATA_PORT", "5050"))
+    debug = os.environ.get("ASKDATA_DEBUG", "1") == "1"
+    # Scripts disable reloader so stop/restart can track a single PID.
+    use_reloader = os.environ.get("ASKDATA_RELOAD", "0") == "1"
+    app.run(host=host, port=port, debug=debug, use_reloader=use_reloader)
