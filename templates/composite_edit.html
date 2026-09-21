@@ -15,8 +15,6 @@
     <input type="text" name="aliases" placeholder="多个用逗号分隔，如 成本差距, Cost GAP"
       value="{{ row.aliases if row and row.aliases else '' }}">
     <p class="muted">列表「指标」列展示为标签；可用于关键词检索。</p>
-    <label>公式（使用子指标中文名，支持 + - * / 与括号）</label>
-    <input type="text" name="formula" id="formula" required value="{{ row.formula if row else (prefill_formula or '') }}" placeholder="Contract原始成本 - PJ原始成本">
 
     <label>业务线（引用公式首个指标，只读）</label>
     <input type="text" id="cmp_biz_line" readonly
@@ -42,18 +40,24 @@
     </select>
     <p class="muted">业务线/主题域随公式首个指标自动引用；业务对象与业务过程可手工调整。</p>
 
+    <label>公式（使用子指标中文名，支持 + - * / 与括号）</label>
+    <input type="text" name="formula" id="formula" required value="{{ row.formula if row else (prefill_formula or '') }}" placeholder="Contract原始成本 - PJ原始成本">
+
     <label>依赖子指标 <span class="muted">（勾选后自动追加到公式末尾；取消勾选会从公式中移除）</span></label>
+    <div class="sub-metric-search">
+      <input type="search" id="sub-metric-filter" placeholder="按名称或 ID 精确包含筛选（原子 / 派生 / 复合）…"
+        autocomplete="off" aria-label="搜索依赖子指标">
+    </div>
     <div id="sub-metrics">
       <div class="sub-metric-group">
         <div class="sub-metric-group-title">原子</div>
         <div class="checks">
           {% for a in atomics %}
-          <label>
+          <label data-search="{{ a.name }} {{ a.id }}">
             <input type="checkbox" name="sub_metric_ids" value="{{ a.id }}"
               data-name="{{ a.name }}"
               {% if a.id in selected %}checked{% endif %}>
             {{ a.name }}
-            <span class="badge">原子</span>
           </label>
           {% else %}
           <span class="muted">暂无原子指标</span>
@@ -64,12 +68,11 @@
         <div class="sub-metric-group-title">派生</div>
         <div class="checks">
           {% for d in derived %}
-          <label>
+          <label data-search="{{ d.name }} {{ d.id }}">
             <input type="checkbox" name="sub_metric_ids" value="{{ d.id }}"
               data-name="{{ d.name }}"
               {% if d.id in selected %}checked{% endif %}>
             {{ d.name }}
-            <span class="badge">派生</span>
           </label>
           {% else %}
           <span class="muted">暂无派生指标</span>
@@ -80,18 +83,18 @@
         <div class="sub-metric-group-title">复合</div>
         <div class="checks">
           {% for c in composites %}
-          <label>
+          <label data-search="{{ c.name }} {{ c.id }}">
             <input type="checkbox" name="sub_metric_ids" value="{{ c.id }}"
               data-name="{{ c.name }}"
               {% if c.id in selected %}checked{% endif %}>
             {{ c.name }}
-            <span class="badge">复合</span>
           </label>
           {% else %}
           <span class="muted">暂无其他复合指标</span>
           {% endfor %}
         </div>
       </div>
+      <p id="sub-metric-empty" class="muted" hidden>无匹配子指标</p>
     </div>
     {% include "_dim_bind.html" %}
     <label><input type="checkbox" name="check_currency_same" id="check_currency_same" value="1" {% if not row or row.check_currency_same %}checked{% endif %}> 强制币种一致</label>
@@ -322,6 +325,35 @@
     }
     scheduleRegen();
   });
+
+  (function initSubMetricFilter() {
+    const filterInput = document.getElementById('sub-metric-filter');
+    const root = document.getElementById('sub-metrics');
+    const emptyHint = document.getElementById('sub-metric-empty');
+    if (!filterInput || !root) return;
+
+    function applyFilter() {
+      const q = (filterInput.value || '').trim().toLowerCase();
+      let anyVisible = false;
+      root.querySelectorAll('.sub-metric-group').forEach(group => {
+        let groupVisible = 0;
+        group.querySelectorAll('label[data-search]').forEach(lab => {
+          const hay = (lab.getAttribute('data-search') || '').toLowerCase();
+          const show = !q || hay.includes(q);
+          lab.hidden = !show;
+          if (show) groupVisible += 1;
+        });
+        group.hidden = groupVisible === 0 && !!q;
+        if (groupVisible > 0) anyVisible = true;
+      });
+      if (emptyHint) emptyHint.hidden = !q || anyVisible;
+    }
+
+    filterInput.addEventListener('input', applyFilter);
+    filterInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') ev.preventDefault();
+    });
+  })();
 
   regenerateSql();
 })();

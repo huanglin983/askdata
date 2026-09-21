@@ -14,6 +14,7 @@ import metric_sql
 import biz_arch
 from engine import EngineResult, build_composite_sql_preview, run
 import metric_map
+import table_model_map
 
 app = Flask(__name__)
 app.secret_key = "metric-t2sql-demo-dev"
@@ -344,6 +345,18 @@ def meta_field_update(field_id: str):
 @app.route("/meta/rels")
 def meta_rel_list():
     return render_template("meta_rel_list.html", rows=meta.list_meta_rels())
+
+
+@app.route("/meta/map")
+def table_model_map_view():
+    data = table_model_map.build_table_model_map()
+    return render_template(
+        "table_model_map.html",
+        groups=data["groups"],
+        orphan_dims=data["orphan_dims"],
+        orphan_facts=data["orphan_facts"],
+        stats=data["stats"],
+    )
 
 
 @app.route("/meta/rels/edit", methods=["GET", "POST"])

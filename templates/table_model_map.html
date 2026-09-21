@@ -1,0 +1,568 @@
+{% extends "base.html" %}
+{% from "_metric_map_macros.html" import zoom_toolbar %}
+{% block title %}表模型地图{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.75rem">
+    <div>
+      <h1 style="margin:0">表模型地图</h1>
+      <p class="muted" style="margin:0.35rem 0 0">
+        以事实表为中心展示维度关联；卡片<strong>默认只显示数据粒度（主键）</strong>，展开后显示全部启用字段；搜索时只保留命中表及其直接关联表。
+        当前事实 {{ stats.facts }} · 维度 {{ stats.dims }} · 关系 {{ stats.rels }} · 关联线 {{ stats.edges }}
+      </p>
+      <p class="muted" style="margin:0.35rem 0 0">
+        展开后线条连接在关联字段上；多字段关联用不同颜色区分；点击线条高亮并显示逻辑基数（1对1 / 1对多）。空白处拖动画布；右上角缩放（或 Ctrl + 滚轮）。
+      </p>
+    </div>
+    <div class="actions" style="flex-wrap:wrap">
+      <form class="actions metric-search" id="tmap-search-form" onsubmit="return false;">
+        <input type="search" id="tmap-search" placeholder="查询：表名 / 物理名 / 字段…" aria-label="表模型地图查询" autocomplete="off">
+        <button type="button" class="secondary" id="tmap-search-btn">查询</button>
+        <button type="button" class="secondary" id="tmap-search-clear" hidden>清除</button>
+      </form>
+      <a class="btn secondary" href="{{ url_for('meta_rel_list') }}">维度关系</a>
+      <a class="btn secondary" href="{{ url_for('meta_table_list') }}">表元数据</a>
+    </div>
+  </div>
+  <p class="muted" id="tmap-search-status" style="margin:0.5rem 0 0" hidden></p>
+</div>
+
+{% macro table_card(node) %}
+  <div class="tmap-card map-card map-type-{{ 'fact' if node.kind == 'fact' else 'dim' }} is-fields-collapsed"
+       data-table-id="{{ node.id }}"
+       data-table-name="{{ node.name }}"
+       data-physical="{{ node.physical_name }}"
+       data-kind="{{ node.kind }}"
+       tabindex="0" role="group"
+       aria-label="{{ node.name }}">
+    <span class="tmap-card-port tmap-card-port-l" aria-hidden="true"></span>
+    <span class="tmap-card-port tmap-card-port-r" aria-hidden="true"></span>
+    <div class="map-card-hd">
+      <div class="map-card-titles">
+        <div class="map-card-name" title="点击复制中文名">{{ node.name }}</div>
+        <div class="map-card-id tmap-copy-en" title="点击复制物理表名"><code>{{ node.physical_name }}</code></div>
+      </div>
+      <span class="map-badge">{{ node.kind_label }}</span>
+    </div>
+    <div class="map-card-bd tmap-card-bd">
+      <div class="tmap-field-toolbar">
+        <span class="map-card-label">字段 <span class="tmap-field-count muted">（{{ node.fields|length }}）</span></span>
+        <button type="button" class="tmap-expand-btn" data-expand="0" aria-expanded="false">展开全部</button>
+      </div>
+      <ul class="tmap-fields">
+        {% for f in node.fields %}
+        <li class="tmap-field{% if f.is_grain %} is-grain{% endif %}{% if f.is_join %} is-join{% endif %}{% if not f.is_grain %} is-extra{% endif %}"
+            data-field="{{ f.name }}"
+            data-table-id="{{ node.id }}"
+            {% if not f.is_grain %}hidden{% endif %}>
+          <span class="tmap-field-port tmap-port-l" aria-hidden="true"></span>
+          <span class="tmap-field-main">
+            <span class="tmap-field-cn">{{ f.display_name }}</span>
+            <code class="tmap-field-en">{{ f.name }}</code>
+          </span>
+          <span class="tmap-field-tags">
+            {% if f.is_grain %}<span class="tmap-tag tmap-tag-grain" title="数据粒度">PK</span>{% endif %}
+            {% if f.is_join %}<span class="tmap-tag tmap-tag-join" title="关联键">键</span>{% endif %}
+          </span>
+          <span class="tmap-field-port tmap-port-r" aria-hidden="true"></span>
+        </li>
+        {% else %}
+        <li class="tmap-field tmap-field-empty muted">无启用字段</li>
+        {% endfor %}
+        {% if node.fields and not (node.fields | selectattr('is_grain') | list) %}
+        <li class="tmap-field tmap-field-empty muted">未配置数据粒度</li>
+        {% endif %}
+      </ul>
+      <div class="tmap-card-actions">
+        <button type="button" class="tmap-copy-btn" data-copy="{{ node.name }}" title="复制中文名">复制名称</button>
+        <button type="button" class="tmap-copy-btn" data-copy="{{ node.physical_name }}" title="复制物理名">复制英文</button>
+        <a class="map-card-edit" href="{{ node.edit_url }}">编辑元数据</a>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+
+{% if groups %}
+{% for g in groups %}
+<div class="card map-canvas tmap-group"
+     data-map-scope="group"
+     data-fact-id="{{ g.fact_id }}"
+     data-edges='{{ g.edges | tojson }}'>
+  <div class="map-canvas-hd">
+    <h2 class="map-section-title">事实表 · {{ g.fact.name }}</h2>
+    {{ zoom_toolbar() }}
+  </div>
+  <div class="map-viewport tmap-viewport">
+    <div class="org-zoom-shell">
+      <div class="org-zoom-inner">
+        <div class="tmap-layout">
+          <svg class="tmap-edges" aria-hidden="true"></svg>
+          <div class="tmap-col tmap-col-fact">
+            {{ table_card(g.fact) }}
+          </div>
+          <div class="tmap-col tmap-col-dims">
+            {% for d in g.dims %}
+            {{ table_card(d) }}
+            {% endfor %}
+          </div>
+          <div class="tmap-edge-tooltip" hidden></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+  <p class="muted">暂无已启用的事实表与维度关系。请先在「表元数据」注册表，并在「维度关系」配置关联。</p>
+</div>
+{% endif %}
+
+{% if orphan_facts or orphan_dims %}
+<div class="card map-canvas" data-map-scope="orphan">
+  <h2 class="map-section-title">未关联表</h2>
+  <p class="muted" style="margin-top:0">已启用但尚未配置维度关系的表。</p>
+  <div class="tmap-orphan-grid">
+    {% for n in orphan_facts %}
+    {{ table_card(n) }}
+    {% endfor %}
+    {% for n in orphan_dims %}
+    {{ table_card(n) }}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 2;
+  const ZOOM_STEP = 0.1;
+  const NS = 'http://www.w3.org/2000/svg';
+
+  function toastCopy(text) {
+    if (!text) return;
+    const done = () => {
+      const el = document.createElement('div');
+      el.className = 'tmap-toast';
+      el.textContent = '已复制：' + text;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        ta.remove();
+        done();
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      ta.remove();
+      done();
+    }
+  }
+
+  function portCenter(port, layout) {
+    const pr = port.getBoundingClientRect();
+    const lr = layout.getBoundingClientRect();
+    const scale = parseFloat(layout.closest('.org-zoom-inner').dataset.zoom || '1') || 1;
+    return {
+      x: (pr.left + pr.width / 2 - lr.left) / scale,
+      y: (pr.top + pr.height / 2 - lr.top) / scale
+    };
+  }
+
+  function findPort(layout, tableId, fieldName, side) {
+    const card = layout.querySelector('.tmap-card[data-table-id="' + CSS.escape(tableId) + '"]');
+    if (!card || card.hidden || card.classList.contains('is-search-miss')) return null;
+    const field = fieldName
+      ? card.querySelector('.tmap-field[data-field="' + CSS.escape(fieldName) + '"]')
+      : null;
+    if (field && !field.hidden) {
+      return field.querySelector(side === 'left' ? '.tmap-port-l' : '.tmap-port-r');
+    }
+    return card.querySelector(side === 'left' ? '.tmap-card-port-l' : '.tmap-card-port-r');
+  }
+
+  function clearEdgeFocus(group) {
+    group.classList.remove('is-edge-focusing');
+    group.querySelectorAll('.tmap-edge.is-active, .tmap-field.is-edge-hit, .tmap-card.is-edge-related').forEach(el => {
+      el.classList.remove('is-active', 'is-edge-hit', 'is-edge-related');
+    });
+    const tip = group.querySelector('.tmap-edge-tooltip');
+    if (tip) {
+      tip.hidden = true;
+      tip.innerHTML = '';
+    }
+  }
+
+  function drawEdges(group) {
+    const layout = group.querySelector('.tmap-layout');
+    const svg = group.querySelector('.tmap-edges');
+    if (!layout || !svg) return;
+    let edges = [];
+    try {
+      edges = JSON.parse(group.getAttribute('data-edges') || '[]');
+    } catch (_) {
+      edges = [];
+    }
+
+    const w = Math.max(layout.scrollWidth, layout.offsetWidth, 1);
+    const h = Math.max(layout.scrollHeight, layout.offsetHeight, 1);
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    svg.innerHTML = '';
+
+    const defs = document.createElementNS(NS, 'defs');
+    svg.appendChild(defs);
+
+    edges.forEach(edge => {
+      const factCard = layout.querySelector('.tmap-card[data-table-id="' + CSS.escape(edge.fact_table_id) + '"]');
+      const dimCard = layout.querySelector('.tmap-card[data-table-id="' + CSS.escape(edge.dim_table_id) + '"]');
+      if (!factCard || !dimCard) return;
+      if (factCard.classList.contains('is-search-miss') || dimCard.classList.contains('is-search-miss')) return;
+      if (factCard.hidden || dimCard.hidden) return;
+
+      const leftPort = findPort(layout, edge.fact_table_id, edge.left_field, 'right');
+      const rightPort = findPort(layout, edge.dim_table_id, edge.right_field, 'left');
+      if (!leftPort || !rightPort) return;
+
+      const a = portCenter(leftPort, layout);
+      const b = portCenter(rightPort, layout);
+      const dx = Math.max(40, Math.abs(b.x - a.x) * 0.4);
+      const d = 'M ' + a.x + ' ' + a.y +
+        ' C ' + (a.x + dx) + ' ' + a.y + ', ' + (b.x - dx) + ' ' + b.y + ', ' + b.x + ' ' + b.y;
+
+      const markerId = 'arr-' + edge.id;
+      const marker = document.createElementNS(NS, 'marker');
+      marker.setAttribute('id', markerId);
+      marker.setAttribute('markerWidth', '8');
+      marker.setAttribute('markerHeight', '8');
+      marker.setAttribute('refX', '6');
+      marker.setAttribute('refY', '3');
+      marker.setAttribute('orient', 'auto');
+      const tri = document.createElementNS(NS, 'path');
+      tri.setAttribute('d', 'M0,0 L6,3 L0,6 Z');
+      tri.setAttribute('fill', edge.color || '#0f766e');
+      marker.appendChild(tri);
+      defs.appendChild(marker);
+
+      const g = document.createElementNS(NS, 'g');
+      g.classList.add('tmap-edge');
+      g.setAttribute('data-edge-id', edge.id);
+      g.setAttribute('data-rel-id', edge.rel_id);
+      g.style.setProperty('--edge-color', edge.color || '#0f766e');
+
+      const hit = document.createElementNS(NS, 'path');
+      hit.setAttribute('d', d);
+      hit.classList.add('tmap-edge-hit');
+      g.appendChild(hit);
+
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d);
+      path.classList.add('tmap-edge-line');
+      path.setAttribute('stroke', edge.color || '#0f766e');
+      path.setAttribute('marker-end', 'url(#' + markerId + ')');
+      g.appendChild(path);
+
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      const label = document.createElementNS(NS, 'g');
+      label.classList.add('tmap-edge-label');
+      const bg = document.createElementNS(NS, 'rect');
+      const text = document.createElementNS(NS, 'text');
+      text.setAttribute('x', mx);
+      text.setAttribute('y', my);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.textContent = edge.cardinality_label || '1对多';
+      label.appendChild(bg);
+      label.appendChild(text);
+      g.appendChild(label);
+
+      svg.appendChild(g);
+      try {
+        const bb = text.getBBox();
+        bg.setAttribute('x', bb.x - 6);
+        bg.setAttribute('y', bb.y - 3);
+        bg.setAttribute('width', bb.width + 12);
+        bg.setAttribute('height', bb.height + 6);
+        bg.setAttribute('rx', '4');
+      } catch (_) {}
+
+      g.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        const already = g.classList.contains('is-active') && group.classList.contains('is-edge-focusing');
+        clearEdgeFocus(group);
+        if (already) return;
+        group.classList.add('is-edge-focusing');
+        g.classList.add('is-active');
+        const leftField = layout.querySelector(
+          '.tmap-field[data-table-id="' + CSS.escape(edge.fact_table_id) + '"][data-field="' + CSS.escape(edge.left_field) + '"]'
+        );
+        const rightField = layout.querySelector(
+          '.tmap-field[data-table-id="' + CSS.escape(edge.dim_table_id) + '"][data-field="' + CSS.escape(edge.right_field) + '"]'
+        );
+        if (leftField) leftField.classList.add('is-edge-hit');
+        if (rightField) rightField.classList.add('is-edge-hit');
+        if (factCard) factCard.classList.add('is-edge-related');
+        if (dimCard) dimCard.classList.add('is-edge-related');
+
+        const tip = group.querySelector('.tmap-edge-tooltip');
+        if (tip) {
+          tip.hidden = false;
+          tip.innerHTML =
+            '<div class="tmap-tip-title">关联 · ' + (edge.cardinality_label || '') + '</div>' +
+            '<div class="tmap-tip-row"><code>' + edge.left_field + '</code> = <code>' + edge.right_field + '</code></div>' +
+            '<div class="tmap-tip-row muted">JOIN ' + (edge.join_type || 'LEFT') +
+            (edge.key_count > 1 ? ' · 第 ' + (edge.key_index + 1) + '/' + edge.key_count + ' 键' : '') +
+            '</div>' +
+            '<a class="tmap-tip-edit" href="' + (edge.edit_url || '#') + '">编辑关系</a>';
+          tip.style.left = Math.min(mx + 12, w - 200) + 'px';
+          tip.style.top = Math.max(8, my - 40) + 'px';
+        }
+      });
+    });
+  }
+
+  function redrawAll() {
+    document.querySelectorAll('.tmap-group').forEach(drawEdges);
+  }
+
+  /* Expand / collapse fields */
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.tmap-expand-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const card = btn.closest('.tmap-card');
+    if (!card) return;
+    const expand = btn.getAttribute('data-expand') !== '1';
+    btn.setAttribute('data-expand', expand ? '1' : '0');
+    btn.setAttribute('aria-expanded', expand ? 'true' : 'false');
+    btn.textContent = expand ? '收起' : '展开全部';
+    card.classList.toggle('is-fields-collapsed', !expand);
+    card.querySelectorAll('.tmap-field.is-extra').forEach(li => {
+      li.hidden = !expand;
+    });
+    const group = card.closest('.tmap-group');
+    if (group) {
+      requestAnimationFrame(() => drawEdges(group));
+    }
+  });
+
+  /* Copy */
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.tmap-copy-btn');
+    if (btn) {
+      e.stopPropagation();
+      toastCopy(btn.getAttribute('data-copy') || '');
+      return;
+    }
+    const name = e.target.closest('.tmap-card .map-card-name');
+    if (name && name.closest('.tmap-card')) {
+      e.stopPropagation();
+      toastCopy(name.textContent.trim());
+      return;
+    }
+    const en = e.target.closest('.tmap-copy-en');
+    if (en) {
+      e.stopPropagation();
+      toastCopy((en.textContent || '').trim());
+    }
+  });
+
+  /* Click blank to clear edge focus */
+  document.querySelectorAll('.tmap-group').forEach(group => {
+    group.querySelector('.tmap-viewport')?.addEventListener('click', function (e) {
+      if (e.target.closest('.tmap-edge, .tmap-card, .map-zoom-toolbar, .tmap-edge-tooltip')) return;
+      clearEdgeFocus(group);
+    });
+  });
+
+  /* Zoom / pan (aligned with metric map) */
+  function getZoom(inner) {
+    return parseFloat(inner.dataset.zoom || '1') || 1;
+  }
+  function setZoom(inner, z) {
+    z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+    inner.dataset.zoom = String(z);
+    inner.style.transform = 'scale(' + z + ')';
+    const shell = inner.closest('.org-zoom-shell');
+    const label = shell?.closest('.map-canvas')?.querySelector('[data-zoom-label]');
+    if (label) label.textContent = Math.round(z * 100) + '%';
+    const group = inner.closest('.tmap-group');
+    if (group) requestAnimationFrame(() => drawEdges(group));
+  }
+
+  document.querySelectorAll('.map-canvas').forEach(canvas => {
+    const viewport = canvas.querySelector('.map-viewport');
+    const inner = canvas.querySelector('.org-zoom-inner');
+    if (!viewport || !inner) return;
+    setZoom(inner, 1);
+
+    canvas.querySelectorAll('[data-zoom]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.getAttribute('data-zoom');
+        const z = getZoom(inner);
+        if (act === 'in') setZoom(inner, z + ZOOM_STEP);
+        else if (act === 'out') setZoom(inner, z - ZOOM_STEP);
+        else if (act === 'fit') {
+          setZoom(inner, 1);
+          viewport.scrollLeft = 0;
+          viewport.scrollTop = 0;
+        }
+      });
+    });
+
+    viewport.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom(inner, getZoom(inner) + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    }, { passive: false });
+
+    let pan = null;
+    viewport.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('a, button, .tmap-edge, .tmap-card-actions, input')) return;
+      pan = { x: e.clientX, y: e.clientY, sl: viewport.scrollLeft, st: viewport.scrollTop };
+      viewport.classList.add('is-panning');
+      viewport.setPointerCapture(e.pointerId);
+    });
+    viewport.addEventListener('pointermove', function (e) {
+      if (!pan) return;
+      viewport.scrollLeft = pan.sl - (e.clientX - pan.x);
+      viewport.scrollTop = pan.st - (e.clientY - pan.y);
+    });
+    function endPan() {
+      pan = null;
+      viewport.classList.remove('is-panning');
+    }
+    viewport.addEventListener('pointerup', endPan);
+    viewport.addEventListener('pointercancel', endPan);
+  });
+
+  /* Build table adjacency from all group edges */
+  function buildRelatedMap() {
+    const related = new Map();
+    function link(a, b) {
+      if (!a || !b) return;
+      if (!related.has(a)) related.set(a, new Set());
+      if (!related.has(b)) related.set(b, new Set());
+      related.get(a).add(b);
+      related.get(b).add(a);
+    }
+    document.querySelectorAll('.tmap-group').forEach(group => {
+      let edges = [];
+      try {
+        edges = JSON.parse(group.getAttribute('data-edges') || '[]');
+      } catch (_) {}
+      edges.forEach(e => link(e.fact_table_id, e.dim_table_id));
+    });
+    return related;
+  }
+
+  function cardMatches(card, q) {
+    const hay = [
+      card.getAttribute('data-table-name') || '',
+      card.getAttribute('data-physical') || '',
+      card.getAttribute('data-table-id') || '',
+      ...Array.from(card.querySelectorAll('.tmap-field')).map(f =>
+        (f.getAttribute('data-field') || '') + ' ' + (f.textContent || '')
+      )
+    ].join(' ').toLowerCase();
+    return hay.includes(q);
+  }
+
+  /* Search: keep hit tables + directly related tables only */
+  function runSearch() {
+    const q = (document.getElementById('tmap-search').value || '').trim().toLowerCase();
+    const clearBtn = document.getElementById('tmap-search-clear');
+    const status = document.getElementById('tmap-search-status');
+    if (clearBtn) clearBtn.hidden = !q;
+
+    const allCards = Array.from(document.querySelectorAll('.tmap-card'));
+    if (!q) {
+      allCards.forEach(card => {
+        card.classList.remove('is-search-hit', 'is-search-miss');
+        card.hidden = false;
+      });
+      document.querySelectorAll('.tmap-group, .map-canvas[data-map-scope="orphan"]').forEach(g => {
+        g.classList.remove('is-search-hidden');
+      });
+      if (status) status.hidden = true;
+      redrawAll();
+      return;
+    }
+
+    const relatedMap = buildRelatedMap();
+    const hitIds = new Set();
+    allCards.forEach(card => {
+      if (cardMatches(card, q)) hitIds.add(card.getAttribute('data-table-id'));
+    });
+
+    const keepIds = new Set(hitIds);
+    hitIds.forEach(id => {
+      const neighbors = relatedMap.get(id);
+      if (neighbors) neighbors.forEach(n => keepIds.add(n));
+    });
+
+    let shown = 0;
+    allCards.forEach(card => {
+      const id = card.getAttribute('data-table-id');
+      const keep = keepIds.has(id);
+      const isHit = hitIds.has(id);
+      card.hidden = !keep;
+      card.classList.toggle('is-search-hit', keep && isHit);
+      card.classList.toggle('is-search-miss', !keep);
+      if (keep) shown += 1;
+    });
+
+    document.querySelectorAll('.tmap-group').forEach(g => {
+      const any = Array.from(g.querySelectorAll('.tmap-card')).some(c => !c.hidden);
+      g.classList.toggle('is-search-hidden', !any);
+    });
+    const orphan = document.querySelector('.map-canvas[data-map-scope="orphan"]');
+    if (orphan) {
+      const any = Array.from(orphan.querySelectorAll('.tmap-card')).some(c => !c.hidden);
+      orphan.classList.toggle('is-search-hidden', !any);
+    }
+
+    if (status) {
+      status.hidden = false;
+      status.textContent = shown
+        ? ('展示 ' + shown + ' 张表（命中 ' + hitIds.size + ' · 含直接关联）')
+        : '无匹配';
+    }
+    redrawAll();
+  }
+  document.getElementById('tmap-search-btn')?.addEventListener('click', runSearch);
+  document.getElementById('tmap-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') runSearch();
+  });
+  document.getElementById('tmap-search-clear')?.addEventListener('click', () => {
+    const input = document.getElementById('tmap-search');
+    if (input) input.value = '';
+    runSearch();
+  });
+
+  window.addEventListener('resize', () => {
+    clearTimeout(window.__tmapResizeTimer);
+    window.__tmapResizeTimer = setTimeout(redrawAll, 120);
+  });
+
+  // Initial draw after layout
+  requestAnimationFrame(() => {
+    requestAnimationFrame(redrawAll);
+  });
+})();
+</script>
+{% endblock %}
