@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from typing import Any
 
-import db
+from askdata.infra import db
 
 _IDENT = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 

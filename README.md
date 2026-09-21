@@ -91,10 +91,17 @@ python -m venv .venv
 ## 目录
 
 ```text
-app.py / db.py / engine.py / intent.py / intent_chatbi.py / intent_llm.py / display.py
-meta.py / biz_arch.py / metric_sql.py / metric_map.py
-chatbi/  templates/  static/  data/  doc/  requirements.txt  .env.example
-start.sh  start.bat
+app.py                 # 启动入口
+askdata/               # 主包
+  infra/               # db
+  meta/                # tables / biz_arch / metric_sql
+  engine/              # 规则引擎
+  intent/              # form / llm / chatbi_bridge
+  chatbi/              # ChatBI 意图流水线
+  maps/                # metric_map / table_model_map
+  web/                 # Flask app + display
+templates/  static/  data/  doc/
+requirements.txt  .env.example  start.sh  start.bat
 ```
 
 

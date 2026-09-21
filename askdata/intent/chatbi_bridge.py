@@ -8,7 +8,7 @@ import logging
 import uuid
 from typing import Any
 
-from engine import Intent
+from askdata.engine import Intent
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ def _dim_names(catalog: dict[str, Any]) -> list[str]:
 def _build_workflow(catalog: dict[str, Any]):
     """按当前 catalog / 百炼配置构建（或复用）ChatBIWorkflow。"""
     global _workflow_singleton, _workflow_key
-    import intent_llm
-    from chatbi.chat_workflow import ChatBIWorkflow
-    from chatbi.llm_clients import BailianChatClient, ForceRuleLLMClient
+    import askdata.intent.llm as intent_llm
+    from askdata.chatbi.chat_workflow import ChatBIWorkflow
+    from askdata.chatbi.llm_clients import BailianChatClient, ForceRuleLLMClient
 
     metric_names = sorted(catalog["name_to_id"].keys(), key=len, reverse=True)
     dim_names = _dim_names(catalog)
@@ -73,7 +73,7 @@ def from_text_chatbi(text: str, *, session_id: str | None = None) -> Intent:
     ChatBI 主链路：实体 Mapper → LLM/规则 → 校验/消歧 → 转为 engine.Intent。
     血缘展开仍走 intent_llm.normalize_llm_payload（对接现有指标引擎）。
     """
-    import intent_llm
+    import askdata.intent.llm as intent_llm
 
     text = (text or "").strip()
     catalog = intent_llm.build_catalog()

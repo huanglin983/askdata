@@ -7,9 +7,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
-import db
-import meta
-import metric_sql
+from askdata.infra import db
+from askdata.meta import metric_sql, tables as meta
 
 
 FACT_ALIAS = "m"
@@ -58,7 +57,7 @@ def _grain_field() -> str:
 def run(intent: Intent) -> EngineResult:
     """Full pipeline: load meta -> bind -> currency -> check -> join -> SQL -> execute."""
     try:
-        from intent_llm import intent_to_engine_dict
+        from askdata.intent.llm import intent_to_engine_dict
 
         intent_dict = intent_to_engine_dict(intent)
     except Exception:  # noqa: BLE001

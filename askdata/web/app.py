@@ -3,20 +3,23 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
-import db
-import display
-import intent as intent_mod
-import meta
-import metric_sql
-import biz_arch
-from engine import EngineResult, build_composite_sql_preview, run
-import metric_map
-import table_model_map
+from askdata.engine import EngineResult, build_composite_sql_preview, run
+from askdata.infra import db
+from askdata.intent import form as intent_mod
+from askdata.maps import metric_map, table_model_map
+from askdata.meta import biz_arch, metric_sql, tables as meta
+from . import display
 
-app = Flask(__name__)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+app = Flask(
+    __name__,
+    template_folder=str(_REPO_ROOT / "templates"),
+    static_folder=str(_REPO_ROOT / "static"),
+)
 app.secret_key = "metric-t2sql-demo-dev"
 
 
@@ -929,7 +932,7 @@ def ask():
             )
             # ChatBI 多指标消歧 / 未识别意图能力引导：提示后不执行 SQL
             try:
-                import intent_llm
+                import askdata.intent.llm as intent_llm
 
                 intent_dict_fn = intent_llm.intent_to_engine_dict
                 needs_help = intent_llm.needs_capability_help
@@ -981,7 +984,7 @@ def ask():
         if result is None:
             # Non-query intents: dictionary / definition — no SQL
             try:
-                import intent_llm
+                import askdata.intent.llm as intent_llm
 
                 non_query = intent_llm.handle_non_query(parsed)
             except Exception:  # noqa: BLE001

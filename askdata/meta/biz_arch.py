@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from typing import Any
 
-import db
+from askdata.infra import db
 
 NODE_TYPES = ("line", "domain", "object", "process")
 

@@ -8,11 +8,12 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
-import db
-import meta
-from engine import Intent, EngineResult
+from askdata.engine import EngineResult, Intent
+from askdata.infra import db
+from askdata.meta import tables as meta
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ _FILTER_KEY_ALIASES = {
 
 
 def load_dotenv_file(path: str | None = None) -> None:
-    env_path = path or os.path.join(os.path.dirname(__file__), ".env")
+    env_path = path or str(Path(__file__).resolve().parents[2] / ".env")
     if not os.path.isfile(env_path):
         return
     try:
@@ -492,7 +493,7 @@ def empty_payload_zh(raw_text: str = "") -> dict[str, Any]:
 
 def lineage_related_ids(root_ids: list[str]) -> list[str]:
     """Bloodline: descendants (and direct atomic parents of derived). Not whole platform."""
-    import metric_map
+    from askdata.maps import metric_map
 
     related: list[str] = []
     seen: set[str] = set(root_ids)

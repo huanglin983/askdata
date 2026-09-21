@@ -4,17 +4,17 @@
 
 ## 1. 代码 ↔ 方案映射
 
-| 方案能力 | 代码文件 |
+| 方案能力 | 代码位置 |
 |---|---|
-| SQLite schema / 种子 / 指标 CRUD / 维度绑定 | `db.py` |
-| 数仓表/字段/关系元数据 | `meta.py` |
-| 业务架构（线/域/对象/过程） | `biz_arch.py` |
-| 原子/派生 SQL 预览与过滤安全 | `metric_sql.py` |
-| 规则引擎（汇率、币种、复合、校验、JOIN） | `engine.py` |
-| 指标依赖地图（业务架构根 + 侧栏子树） | `metric_map.py` |
-| 意图解析（表单 + ChatBI 流水线 / 百炼 / 关键词） | `intent.py` / `intent_chatbi.py` / `intent_llm.py` / `chatbi/` |
-| 中文展示（意图/审计/列名） | `display.py` |
-| Web 管理与问数 | `app.py` + `templates/` + `static/style.css` |
+| SQLite schema / 种子 / 指标 CRUD / 维度绑定 | `askdata/infra/db.py` |
+| 数仓表/字段/关系元数据 | `askdata/meta/tables.py` |
+| 业务架构（线/域/对象/过程） | `askdata/meta/biz_arch.py` |
+| 原子/派生 SQL 预览与过滤安全 | `askdata/meta/metric_sql.py` |
+| 规则引擎（汇率、币种、复合、校验、JOIN） | `askdata/engine/` |
+| 指标依赖地图（业务架构根 + 侧栏子树） | `askdata/maps/metric_map.py` |
+| 意图解析（表单 + ChatBI 流水线 / 百炼 / 关键词） | `askdata/intent/` + `askdata/chatbi/` |
+| 中文展示（意图/审计/列名） | `askdata/web/display.py` |
+| Web 管理与问数 | `app.py` → `askdata/web/app.py` + `templates/` + `static/` |
 | 方案与计算文档 | `doc/` |
 
 ## 2. Web 模块一览
@@ -36,40 +36,23 @@
 
 ```text
 .
-├── README.md                 # 启动与能力说明
+├── README.md
 ├── requirements.txt
 ├── .gitignore
-├── app.py
-├── db.py
-├── meta.py
-├── biz_arch.py
-├── metric_sql.py
-├── metric_map.py
-├── engine.py
-├── intent.py
-├── intent_llm.py
-├── display.py
+├── app.py                      # 启动入口（薄）
+├── askdata/                    # 主包
+│   ├── infra/db.py
+│   ├── meta/                   # tables / biz_arch / metric_sql
+│   ├── engine/
+│   ├── intent/                 # form / llm / chatbi_bridge
+│   ├── chatbi/
+│   ├── maps/                   # metric_map / table_model_map
+│   └── web/                    # Flask app + display
 ├── static/
-│   └── style.css             # 含 metric-hub / metric-tabs / table.compact
+│   └── style.css
 ├── templates/
-│   ├── base.html             # 顶栏导航
-│   ├── metrics.html          # 指标管理总览
-│   ├── _metric_tabs.html     # 列表页类型 Tab
-│   ├── atomic_*.html / derived_*.html / composite_*.html
-│   ├── meta_*.html / biz_arch*.html / ask.html
-│   ├── metric_map.html / metric_map_panel.html / _metric_map_macros.html
-│   └── _filters.html / _dim_bind.html
-├── data/                     # demo.db 运行时生成，勿提交
-└── doc/                      # 本目录：方案 + 计算 + 元数据 + 需求规划
-    ├── README.md
-    ├── 01_技术方案.md
-    ├── 02_计算与币种规则.md
-    ├── 03_元数据与配置模型.md
-    ├── 04_Demo实现与拆库说明.md
-    ├── 05_详细设计_Flask与实现.md
-    ├── 06_需求规划一_Dify与问数查询服务.md
-    ├── 07_指标分层_理论配置与SQL生成.md
-    └── diagrams/             # 交互流程图等
+├── data/                       # demo.db 运行时生成，勿提交
+└── doc/
 ```
 
 ## 4. 拆库步骤（建议）
@@ -116,7 +99,7 @@ python -m venv .venv
 | 方向 | 建议 |
 |---|---|
 | 生产执行 | `engine._execute` 改为 JDBC/ODPS 客户端，SQL 方言保持引擎生成 |
-| 真 NLP | 继续扩展 `chatbi/`；输出对齐 `Intent` / `IntentStruct`，勿让模型写 SQL |
+| 真 NLP | 继续扩展 `askdata/chatbi/`；输出对齐 `Intent` / `IntentStruct`，勿让模型写 SQL |
 | 向量召回 | 实现 `EmbeddingMapper` + 白名单校验，禁止模糊编造指标名 |
 | 配置同步 | 从指标平台 API/Excel 导入到 `metric_*` 表 |
 | 多事实表 | 扩展 `source_table` 路由与 `meta_table_rel` |

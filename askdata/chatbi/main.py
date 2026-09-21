@@ -1,8 +1,7 @@
 # main.py
 """ChatBI 意图流水线本地测试入口。支持：
 
-- 项目根目录：python -m chatbi.main  /  python chatbi/main.py
-- chatbi 目录：python main.py
+- 项目根目录：python -m askdata.chatbi.main
 """
 from __future__ import annotations
 
@@ -12,12 +11,12 @@ import logging
 import sys
 from pathlib import Path
 
-# 允许在 chatbi/ 下直接 python main.py
-_ROOT = Path(__file__).resolve().parent.parent
+# 允许直接 python askdata/chatbi/main.py
+_ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from chatbi.chat_workflow import ChatBIWorkflow  # noqa: E402
+from askdata.chatbi.chat_workflow import ChatBIWorkflow  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

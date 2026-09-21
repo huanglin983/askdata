@@ -13,7 +13,7 @@ class BailianChatClient:
 
     async def chat(self, system: str, user: str) -> str:
         def _call() -> str:
-            import intent_llm
+            import askdata.intent.llm as intent_llm
 
             return intent_llm.call_bailian_raw(
                 [

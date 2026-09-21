@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import biz_arch
-import db
+from askdata.infra import db
+from askdata.meta import biz_arch
 
 TYPE_LABEL = {
     "composite": "复合",

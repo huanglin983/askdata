@@ -40,7 +40,7 @@
 | 要改页面 / 加菜单 | §6、§7、附录 |
 | 要改指标配置逻辑 | §8、§9 |
 | 要改问数 / SQL 生成 | §10、§11、§12 |
-| 要改自然语言意图 / ChatBI | §10.2～§10.5、`chatbi/`、`intent_chatbi.py` |
+| 要改自然语言意图 / ChatBI | §10.2～§10.5、`askdata/chatbi/`、`askdata/intent/chatbi_bridge.py` |
 | 业务口径 / 汇率规则 | [01](01_技术方案.md)、[02](02_计算与币种规则.md) |
 | 表字段含义 | [03](03_元数据与配置模型.md) |
 | 拆库 / 启动 | [04](04_Demo实现与拆库说明.md) |
@@ -90,7 +90,7 @@ Flask 是 Python 的**轻量 Web 框架**。相对 Django 等「全家桶」，F
 - Jinja2 模板渲染
 - 静态文件服务
 
-本项目**没有**用 Flask Blueprint 拆包、没有登录中间件、没有 ORM——业务代码直接 `import db` / `import engine`。
+本项目**没有**用 Flask Blueprint 拆包、没有登录中间件、没有 ORM——业务代码通过 `askdata.infra.db` / `askdata.engine` 等包内模块调用。
 
 最小心智模型：
 
@@ -232,49 +232,37 @@ flowchart TB
 ## 4. 目录与模块职责
 
 ```text
-askdata/
-├── app.py              # Flask 入口：全部路由、表单适配、预览 API
-├── db.py               # SQLite 连接、建表/迁移/种子、指标 CRUD、维度绑定
-├── meta.py             # 表/字段/关系元数据；分析维度；JOIN 解析
-├── biz_arch.py         # 业务架构四级树
-├── metric_sql.py       # 原子/派生 SQL 预览、过滤安全、CASE 包裹
-├── metric_map.py       # 指标地图：业务架构根 + 依赖/反向子树
-├── engine.py           # 问数规则引擎：Intent → SQL → 执行 → EngineResult
-├── intent.py           # 表单意图 / 自然语言 from_text（ChatBI 主链路）
-├── intent_chatbi.py    # ChatBI → engine.Intent 适配；会话与能力引导
-├── intent_llm.py       # 百炼调用、目录白名单、normalize、非查询/能力帮助
-├── display.py          # 意图与审计的中文展示
-├── chatbi/             # 企业级意图流水线（对标 Supersonic 思想）
-│   ├── chat_workflow.py      # 编排：预处理→Mapper→解析→校验→记忆→路由
-│   ├── semantic_parser.py    # LLM 解析 + Rule 兜底
-│   ├── semantic_corrector.py # 指标/维度白名单、多指标消歧
-│   ├── chat_memory.py        # 会话记忆（内存；可换 Redis）
-│   ├── schemas.py            # IntentStruct / SchemaMapInfo / VerifyResult
-│   ├── config.py             # Prompt 与本地字典占位
-│   ├── llm_clients.py        # 百炼适配 / 强制规则 Client
-│   ├── main.py               # 本地 Mock 测试入口
-│   └── entity_mapper/        # 词典 Mapper + Embedding 占位
-├── requirements.txt    # flask / openai / pydantic
+.
+├── app.py                 # 启动入口（薄）
+├── askdata/               # 主包
+│   ├── infra/db.py        # SQLite 连接、建表/迁移/种子、指标 CRUD
+│   ├── meta/              # tables / biz_arch / metric_sql
+│   ├── engine/            # Intent → SQL → 执行
+│   ├── intent/            # form / llm / chatbi_bridge
+│   ├── chatbi/            # ChatBI 意图流水线
+│   ├── maps/              # metric_map / table_model_map
+│   └── web/               # Flask app + display
+├── requirements.txt
 ├── static/style.css
-├── templates/          # Jinja2 页面
-├── data/demo.db        # 运行时生成（勿提交）
-└── doc/                # 方案与设计文档
+├── templates/
+├── data/demo.db           # 运行时生成（勿提交）
+└── doc/
 ```
 
-| 文件 | 对外核心能力 |
+| 位置 | 对外核心能力 |
 |---|---|
-| `app.py` | Web 适配器；把 HTTP 转成对上述模块的调用 |
-| `db.py` | `init_db` / `get_conn` / `upsert_*` / `list_*` / `metric_dim_bind` |
-| `meta.py` | `upsert_meta_table` / `list_ask_analysis_fields` / `resolve_joins_for_tables` |
-| `biz_arch.py` | `build_tree` / `upsert_node` / `taxonomy_catalog` |
-| `metric_sql.py` | `build_atomic_sql_preview` / `build_derived_sql_preview` / `assert_executable_select` |
-| `engine.py` | `run(Intent)` / `build_composite_sql_preview` |
-| `intent.py` | `from_form` / `from_text`（默认 ChatBI，失败回退百炼/关键词） |
-| `intent_chatbi.py` | `from_text_chatbi`：跑流水线并映射为 `Intent` |
-| `intent_llm.py` | 目录组装、DashScope、`normalize_llm_payload`、`handle_non_query`、能力引导 |
-| `chatbi/*` | Schema 实体匹配、语义抽取、校验消歧、会话、路由（不含 SQL） |
-| `display.py` | `intent_zh` / `audit_zh` / `column_zh` / `dumps_zh` |
-| `metric_map.py` | `build_metric_map()` / `build_subtree(metric_id)` |
+| `app.py` / `askdata/web/app.py` | Web 适配器；把 HTTP 转成对上述模块的调用 |
+| `askdata/infra/db.py` | `init_db` / `get_conn` / `upsert_*` / `list_*` / `metric_dim_bind` |
+| `askdata/meta/tables.py` | `upsert_meta_table` / `list_ask_analysis_fields` / `resolve_joins_for_tables` |
+| `askdata/meta/biz_arch.py` | `build_tree` / `upsert_node` / `taxonomy_catalog` |
+| `askdata/meta/metric_sql.py` | `build_atomic_sql_preview` / `build_derived_sql_preview` / `assert_executable_select` |
+| `askdata/engine/` | `run(Intent)` / `build_composite_sql_preview` |
+| `askdata/intent/form.py` | `from_form` / `from_text`（默认 ChatBI，失败回退百炼/关键词） |
+| `askdata/intent/chatbi_bridge.py` | `from_text_chatbi`：跑流水线并映射为 `Intent` |
+| `askdata/intent/llm.py` | 目录组装、DashScope、`normalize_llm_payload`、`handle_non_query`、能力引导 |
+| `askdata/chatbi/*` | Schema 实体匹配、语义抽取、校验消歧、会话、路由（不含 SQL） |
+| `askdata/web/display.py` | `intent_zh` / `audit_zh` / `column_zh` / `dumps_zh` |
+| `askdata/maps/metric_map.py` | `build_metric_map()` / `build_subtree(metric_id)` |
 
 依赖方向（理想上）：
 
@@ -671,7 +659,7 @@ flowchart LR
 
 | 模块 | 职责 |
 |---|---|
-| `chatbi/chat_workflow.py` | 流水线编排；注入指标/维度字典与 system prompt |
+| `askdata/chatbi/chat_workflow.py` | 流水线编排；注入指标/维度字典与 system prompt |
 | `entity_mapper/dict_mapper.py` | 指标/维度子串匹配、币种、阶段、项目编号 |
 | `entity_mapper/embedding_mapper.py` | **向量召回占位**，本次不实现 ANN |
 | `semantic_parser.py` | LLM JSON 抽取；失败降级规则（口径/字典/关联/TopN 关键词） |
@@ -679,7 +667,7 @@ flowchart LR
 | `chat_memory.py` | 按 `session_id` 内存保存最近 `IntentStruct`（可换 Redis） |
 | `llm_clients.py` | `BailianChatClient` / `ForceRuleLLMClient` |
 | `intent_chatbi.py` | 拉平台 catalog、跑 workflow、映射为 `engine.Intent` |
-| `intent.py` | `from_text` 入口：`INTENT_PROVIDER` 控制主链路与回退 |
+| `askdata/intent/form.py` | `from_text` 入口：`INTENT_PROVIDER` 控制主链路与回退 |
 
 #### 10.3.2 Provider 与降级
 
@@ -702,7 +690,7 @@ pip install pydantic
 python -m chatbi.main --batch   # 或 cd chatbi && python main.py
 ```
 
-`chatbi/main.py` 内置 `MockLLMClient`，无需真实大模型即可跑通整套链路。
+`python -m askdata.chatbi.main` 内置 `MockLLMClient`，无需真实大模型即可跑通整套链路。
 
 ### 10.4 Intent / IntentStruct 与历史 JSON 兼容
 

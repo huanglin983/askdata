@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import meta
+from askdata.meta import tables as meta
 
 # Distinct stroke colors for multi-field joins within one relationship
 EDGE_COLORS = [

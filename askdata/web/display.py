@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import db
-import meta
+from askdata.infra import db
+from askdata.meta import tables as meta
 
 CURRENCY_CN = {
     "CNY": "人民币(CNY)",

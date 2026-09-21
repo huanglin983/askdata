@@ -5,9 +5,9 @@ import logging
 import os
 import re
 
-import db
-import meta
-from engine import Intent
+from askdata.engine import Intent
+from askdata.infra import db
+from askdata.meta import tables as meta
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ def from_text_keywords(text: str) -> Intent:
     related_names: list[str] = []
     if intent.include_related and found_ids:
         try:
-            import intent_llm
+            import askdata.intent.llm as intent_llm
 
             related = intent_llm.lineage_related_ids(found_ids)
             intent.related_metric_ids = related
@@ -207,7 +207,7 @@ def from_text_keywords(text: str) -> Intent:
 
 def _provider_mode() -> str:
     try:
-        import intent_llm
+        import askdata.intent.llm as intent_llm
 
         intent_llm.load_dotenv_file()
     except Exception:  # noqa: BLE001
@@ -231,7 +231,7 @@ def from_text(text: str, *, session_id: str | None = None) -> Intent:
     # ---- 主链路 ChatBI ----
     if mode in ("auto", "chatbi", "bailian"):
         try:
-            import intent_chatbi
+            import askdata.intent.chatbi_bridge as intent_chatbi
 
             return intent_chatbi.from_text_chatbi(text, session_id=session_id)
         except Exception as e:  # noqa: BLE001
@@ -245,7 +245,7 @@ def from_text(text: str, *, session_id: str | None = None) -> Intent:
         use_bailian = True
     elif mode == "auto":
         try:
-            import intent_llm
+            import askdata.intent.llm as intent_llm
 
             use_bailian = intent_llm.bailian_configured()
         except Exception:  # noqa: BLE001
@@ -253,7 +253,7 @@ def from_text(text: str, *, session_id: str | None = None) -> Intent:
 
     if use_bailian:
         try:
-            import intent_llm
+            import askdata.intent.llm as intent_llm
 
             return intent_llm.from_text_bailian(text)
         except Exception as e:  # noqa: BLE001
